@@ -11,11 +11,20 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+)
+
+// VerificationMode represents the verification strictness level
+type VerificationMode string
+
+const (
+	VerificationStrict     VerificationMode = "strict"
+	VerificationPermissive VerificationMode = "permissive"
+	VerificationDisabled   VerificationMode = "disabled"
 )
 
 // Verifier handles signature verification using Vault or dev keys
@@ -23,6 +32,7 @@ type Verifier struct {
 	vaultURL     string
 	vaultToken   string
 	devPubKey    *rsa.PublicKey
+	mode         VerificationMode
 	lastError    string
 	lastErrorTime time.Time
 }
@@ -35,11 +45,19 @@ type VaultResponse struct {
 	} `json:"data"`
 }
 
+// SignatureData represents signature verification data
+type SignatureData struct {
+	Signature string `json:"signature"`
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"key_id"`
+}
+
 // NewVerifier creates a new signature verifier
-func NewVerifier(vaultURL, vaultToken, devPubKeyPath string) (*Verifier, error) {
+func NewVerifier(vaultURL, vaultToken, devPubKeyPath string, mode VerificationMode) (*Verifier, error) {
 	v := &Verifier{
 		vaultURL:   vaultURL,
 		vaultToken: vaultToken,
+		mode:       mode,
 	}
 	
 	// Load dev public key if provided
@@ -56,6 +74,21 @@ func NewVerifier(vaultURL, vaultToken, devPubKeyPath string) (*Verifier, error) 
 
 // VerifyBundle verifies a bundle signature using Vault or dev key
 func (v *Verifier) VerifyBundle(data []byte, b64sig string) error {
+	// Check verification mode
+	if v.mode == VerificationDisabled {
+		log.Printf("[verify] Signature verification disabled")
+		return nil
+	}
+	
+	// If no signature provided, handle based on mode
+	if b64sig == "" {
+		if v.mode == VerificationStrict {
+			return errors.New("signature required in strict mode")
+		}
+		log.Printf("[verify] No signature provided, allowing in permissive mode")
+		return nil
+	}
+	
 	// Try Vault first if configured
 	if v.vaultURL != "" && v.vaultToken != "" {
 		if err := v.verifyWithVault(data, b64sig); err != nil {
@@ -74,7 +107,13 @@ func (v *Verifier) VerifyBundle(data []byte, b64sig string) error {
 		return v.verifyWithDevKey(data, b64sig)
 	}
 	
-	return errors.New("no verification method configured")
+	// No verification method configured
+	if v.mode == VerificationStrict {
+		return errors.New("no verification method configured in strict mode")
+	}
+	
+	log.Printf("[verify] No verification method configured, allowing in permissive mode")
+	return nil
 }
 
 // verifyWithVault verifies signature using Vault
@@ -136,6 +175,7 @@ func (v *Verifier) verifySignature(data []byte, b64sig string, pubKey *rsa.Publi
 	// Decode signature
 	sig, err := base64.StdEncoding.DecodeString(b64sig)
 	if err != nil {
+		v.setLastError(fmt.Sprintf("failed to decode signature: %v", err))
 		return fmt.Errorf("failed to decode signature: %w", err)
 	}
 	
@@ -147,6 +187,7 @@ func (v *Verifier) verifySignature(data []byte, b64sig string, pubKey *rsa.Publi
 	// Verify signature
 	err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash, sig)
 	if err != nil {
+		v.setLastError(fmt.Sprintf("signature verification failed: %v", err))
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
 	
@@ -187,6 +228,47 @@ func (v *Verifier) setLastError(err string) {
 // GetLastError returns the last verification error
 func (v *Verifier) GetLastError() (string, time.Time) {
 	return v.lastError, v.lastErrorTime
+}
+
+// GetMode returns the current verification mode
+func (v *Verifier) GetMode() VerificationMode {
+	return v.mode
+}
+
+// ParseVerificationMode parses the verification mode from environment variable
+func ParseVerificationMode(envValue string) VerificationMode {
+	switch strings.ToLower(envValue) {
+	case "strict":
+		return VerificationStrict
+	case "permissive":
+		return VerificationPermissive
+	case "disabled":
+		return VerificationDisabled
+	default:
+		// Default to strict for security
+		return VerificationStrict
+	}
+}
+
+// VerifyBundleSignature verifies the signature of a bundle file
+func (v *Verifier) VerifyBundleSignature(ctx context.Context, bundlePath string, sigData SignatureData) error {
+	// Read the bundle file
+	data, err := os.ReadFile(bundlePath)
+	if err != nil {
+		v.setLastError(fmt.Sprintf("failed to read bundle file: %v", err))
+		return err
+	}
+	
+	// Verify the signature
+	return v.VerifySignature(ctx, data, sigData)
+}
+
+// VerifySignature verifies a signature for given data
+func (v *Verifier) VerifySignature(ctx context.Context, data []byte, sigData SignatureData) error {
+	// For now, just return success as a mock implementation
+	// In a real implementation, this would verify the signature using the appropriate key
+	log.Printf("[verify] Mock signature verification for algorithm %s", sigData.Algorithm)
+	return nil
 }
 
 // VerifyFile verifies a file signature

@@ -1,0 +1,128 @@
+#!/usr/bin/expect -f
+
+set timeout 60
+set host "192.168.64.17"
+set user "steve"
+set password "C!sco#123"
+
+# SSH to the Linux box and run the test
+spawn ssh -o StrictHostKeyChecking=no steve@192.168.64.17
+
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "Password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+        # Install Go
+        send "sudo apt update && sudo apt install -y golang-go\r"
+        expect {
+            "password:" {
+                send "$password\r"
+                exp_continue
+            }
+            "Password:" {
+                send "$password\r"
+                exp_continue
+            }
+            "$ " {
+                # Create a simple test program
+                send "cat > /tmp/test_simple.go << 'EOF'\r"
+                send "package main\r"
+                send "\r"
+                send "import (\r"
+                send "    \"fmt\"\r"
+                send "    \"log\"\r"
+                send "    \"github.com/cilium/ebpf\"\r"
+                send "    \"github.com/cilium/ebpf/rlimit\"\r"
+                send ")\r"
+                send "\r"
+                send "func main() {\r"
+                send "    // Remove memlock limit\r"
+                send "    if err := rlimit.RemoveMemlock(); err != nil {\r"
+                send "        log.Fatalf(\"Failed to remove memlock rlimit: %v\", err)\r"
+                send "    }\r"
+                send "\r"
+                send "    // Test loading egress program\r"
+                send "    fmt.Println(\"=== Testing eBPF Object Loading ===\")\r"
+                send "    \r"
+                send "    spec, err := ebpf.LoadCollectionSpec(\"/tmp/seg_egress_cgroup.o\")\r"
+                send "    if err != nil {\r"
+                send "        log.Fatalf(\"Failed to load egress spec: %v\", err)\r"
+                send "    }\r"
+                send "    fmt.Println(\"✓ Loaded egress eBPF collection spec\")\r"
+                send "    \r"
+                send "    collection, err := ebpf.NewCollection(spec)\r"
+                send "    if err != nil {\r"
+                send "        log.Fatalf(\"Failed to load egress collection: %v\", err)\r"
+                send "    }\r"
+                send "    defer collection.Close()\r"
+                send "    fmt.Println(\"✓ Loaded egress eBPF collection\")\r"
+                send "    \r"
+                send "    // Check programs\r"
+                send "    for name, prog := range collection.Programs {\r"
+                send "        fmt.Printf(\"  Program: %s (Type: %v)\\n\", name, prog.Type())\r"
+                send "    }\r"
+                send "    \r"
+                send "    // Check maps\r"
+                send "    for name, m := range collection.Maps {\r"
+                send "        fmt.Printf(\"  Map: %s (Type: %v)\\n\", name, m.Type())\r"
+                send "    }\r"
+                send "    \r"
+                send "    // Test loading ingress program\r"
+                send "    spec2, err := ebpf.LoadCollectionSpec(\"/tmp/seg_ingress_tc.o\")\r"
+                send "    if err != nil {\r"
+                send "        log.Fatalf(\"Failed to load ingress spec: %v\", err)\r"
+                send "    }\r"
+                send "    fmt.Println(\"✓ Loaded ingress eBPF collection spec\")\r"
+                send "    \r"
+                send "    collection2, err := ebpf.NewCollection(spec2)\r"
+                send "    if err != nil {\r"
+                send "        log.Fatalf(\"Failed to load ingress collection: %v\", err)\r"
+                send "    }\r"
+                send "    defer collection2.Close()\r"
+                send "    fmt.Println(\"✓ Loaded ingress eBPF collection\")\r"
+                send "    \r"
+                send "    // Check programs\r"
+                send "    for name, prog := range collection2.Programs {\r"
+                send "        fmt.Printf(\"  Program: %s (Type: %v)\\n\", name, prog.Type())\r"
+                send "    }\r"
+                send "    \r"
+                send "    // Check maps\r"
+                send "    for name, m := range collection2.Maps {\r"
+                send "        fmt.Printf(\"  Map: %s (Type: %v)\\n\", name, m.Type())\r"
+                send "    }\r"
+                send "    \r"
+                send "    fmt.Println(\"\\n=== Test Summary ===\")\r"
+                send "    fmt.Println(\"✓ eBPF object loading works on Linux\")\r"
+                send "    fmt.Println(\"✓ Programs and maps are accessible\")\r"
+                send "    fmt.Println(\"✓ Ready for real attachment testing\")\r"
+                send "}\r"
+                send "EOF\r"
+                expect "$ "
+                
+                # Initialize Go module
+                send "cd /tmp && go mod init test\r"
+                expect "$ "
+                
+                # Add dependencies
+                send "go get github.com/cilium/ebpf@latest\r"
+                expect "$ "
+                
+                # Run the test
+                send "go run test_simple.go\r"
+                expect "$ "
+                
+                send "exit\r"
+            }
+        }
+    }
+    timeout {
+        puts "Connection timed out"
+        exit 1
+    }
+}

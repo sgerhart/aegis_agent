@@ -32,7 +32,7 @@ CLANG_FLAGS += -I./include
 endif
 
 # Source files
-SOURCES = seg_egress_cgroup.bpf.c seg_ingress_tc.bpf.c
+SOURCES = seg_egress_cgroup.bpf.c seg_ingress_tc.bpf.c seg_policy_maps.bpf.c
 OBJECTS = $(SOURCES:.c=.o)
 
 # Default target

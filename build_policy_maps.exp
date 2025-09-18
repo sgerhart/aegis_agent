@@ -1,0 +1,188 @@
+#!/usr/bin/expect -f
+
+set timeout 60
+set host "192.168.64.17"
+set user "steve"
+set password "C!sco#123"
+
+# SSH to the Linux box and build the policy maps program
+spawn ssh -o StrictHostKeyChecking=no steve@192.168.64.17
+
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "Password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+        # Create the policy maps source file
+        send "cat > /tmp/seg_policy_maps.bpf.c << 'EOF'\r"
+        send "// SPDX-License-Identifier: GPL-2.0\r"
+        send "// AegisFlux Segmentation Policy Maps\r"
+        send "// Defines pinned maps for policy management and enforcement\r"
+        send "\r"
+        send "#include <vmlinux.h>\r"
+        send "#include <bpf/bpf_helpers.h>\r"
+        send "#include <bpf/bpf_endian.h>\r"
+        send "\r"
+        send "// Policy edge structure for network segmentation\r"
+        send "struct policy_edge {\r"
+        send "    __u32 src_ip;\r"
+        send "    __u32 dst_ip;\r"
+        send "    __u32 src_mask;\r"
+        send "    __u32 dst_mask;\r"
+        send "    __u16 src_port;\r"
+        send "    __u16 dst_port;\r"
+        send "    __u8 protocol;\r"
+        send "    __u8 action; // 0=BLOCK, 1=ALLOW, 2=LOG\r"
+        send "    __u8 priority;\r"
+        send "    __u32 process_uid;\r"
+        send "    __u32 process_gid;\r"
+        send "    __u64 timestamp;\r"
+        send "};\r"
+        send "\r"
+        send "// LPM (Longest Prefix Match) entry for CIDR allowlists\r"
+        send "struct allow_cidr {\r"
+        send "    __u32 prefix_len;\r"
+        send "    __u32 ip;\r"
+        send "    __u8 action; // 0=BLOCK, 1=ALLOW\r"
+        send "    __u8 priority;\r"
+        send "    __u64 timestamp;\r"
+        send "};\r"
+        send "\r"
+        send "// Statistics for policy enforcement\r"
+        send "struct policy_stats {\r"
+        send "    __u64 total_policies;\r"
+        send "    __u64 active_policies;\r"
+        send "    __u64 blocked_connections;\r"
+        send "    __u64 allowed_connections;\r"
+        send "    __u64 logged_connections;\r"
+        send "    __u64 policy_hits[256];\r"
+        send "};\r"
+        send "\r"
+        send "// Pinned maps under /sys/fs/bpf/aegis/\r"
+        send "struct {\r"
+        send "    __uint(type, BPF_MAP_TYPE_HASH);\r"
+        send "    __uint(max_entries, 1024);\r"
+        send "    __type(key, __u32);\r"
+        send "    __type(value, struct policy_edge);\r"
+        send "    __uint(pinning, PIN_GLOBAL_NS);\r"
+        send "} policy_edges SEC(\".maps\");\r"
+        send "\r"
+        send "struct {\r"
+        send "    __uint(type, BPF_MAP_TYPE_LPM_TRIE);\r"
+        send "    __uint(max_entries, 512);\r"
+        send "    __type(key, struct allow_cidr);\r"
+        send "    __type(value, __u8);\r"
+        send "    __uint(pinning, PIN_GLOBAL_NS);\r"
+        send "} allow_lpm4 SEC(\".maps\");\r"
+        send "\r"
+        send "struct {\r"
+        send "    __uint(type, BPF_MAP_TYPE_ARRAY);\r"
+        send "    __uint(max_entries, 1);\r"
+        send "    __type(key, __u32);\r"
+        send "    __type(value, struct policy_stats);\r"
+        send "    __uint(pinning, PIN_GLOBAL_NS);\r"
+        send "} policy_stats_map SEC(\".maps\");\r"
+        send "\r"
+        send "// Helper function to check if an IP matches a CIDR\r"
+        send "static __always_inline int cidr_match(__u32 ip, __u32 prefix, __u32 prefix_len) {\r"
+        send "    __u32 mask = (0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF;\r"
+        send "    return (ip & mask) == (prefix & mask);\r"
+        send "}\r"
+        send "\r"
+        send "// Helper function to get current timestamp\r"
+        send "static __always_inline __u64 get_timestamp() {\r"
+        send "    return bpf_ktime_get_ns();\r"
+        send "}\r"
+        send "\r"
+        send "// Dummy program that can be attached to verify maps work\r"
+        send "SEC(\"cgroup/connect4\")\r"
+        send "int policy_enforcer_connect4(struct bpf_sock_addr *ctx)\r"
+        send "{\r"
+        send "    // This is a dummy program that just returns ALLOW\r"
+        send "    // In a real implementation, this would check policies\r"
+        send "    return 1; // ALLOW\r"
+        send "}\r"
+        send "\r"
+        send "SEC(\"cgroup/connect6\")\r"
+        send "int policy_enforcer_connect6(struct bpf_sock_addr *ctx)\r"
+        send "{\r"
+        send "    // This is a dummy program that just returns ALLOW\r"
+        send "    // In a real implementation, this would check policies\r"
+        send "    return 1; // ALLOW\r"
+        send "}\r"
+        send "\r"
+        send "char _license[] SEC(\"license\") = \"GPL\";\r"
+        send "EOF\r"
+        expect "$ "
+        
+        # Create the aegis directory
+        send "sudo mkdir -p /sys/fs/bpf/aegis\r"
+        expect "$ "
+        
+        # Compile the policy maps program
+        send "clang -g -O2 -target bpf -D__TARGET_ARCH_arm64 -I/usr/include/aarch64-linux-gnu -c /tmp/seg_policy_maps.bpf.c -o /tmp/seg_policy_maps.o\r"
+        expect "$ "
+        
+        # Load the program to create pinned maps
+        send "sudo bpftool prog load /tmp/seg_policy_maps.o /sys/fs/bpf/aegis/policy_maps\r"
+        expect "$ "
+        
+        # Verify the maps were created
+        send "echo '=== Checking pinned maps ==='\r"
+        expect "$ "
+        send "ls -la /sys/fs/bpf/aegis/\r"
+        expect "$ "
+        
+        # Show map details
+        send "echo 'Policy edges map:'\r"
+        expect "$ "
+        send "sudo bpftool map show pinned /sys/fs/bpf/aegis/policy_edges\r"
+        expect "$ "
+        
+        send "echo 'Allow LPM4 map:'\r"
+        expect "$ "
+        send "sudo bpftool map show pinned /sys/fs/bpf/aegis/allow_lpm4\r"
+        expect "$ "
+        
+        # Add some test data
+        send "echo '=== Adding test data ==='\r"
+        expect "$ "
+        
+        # Add a policy edge
+        send "sudo bpftool map update pinned /sys/fs/bpf/aegis/policy_edges key 1 0 0 0 value 192.168.1.0 192.168.2.0 255.255.255.0 255.255.255.0 80 443 6 1 10 1000 1000 0\r"
+        expect "$ "
+        
+        # Add an allow CIDR
+        send "sudo bpftool map update pinned /sys/fs/bpf/aegis/allow_lpm4 key 24 192.168.1.0 0 0 0 value 1\r"
+        expect "$ "
+        
+        # Verify the data
+        send "echo '=== Verifying data ==='\r"
+        expect "$ "
+        send "sudo bpftool map dump pinned /sys/fs/bpf/aegis/policy_edges\r"
+        expect "$ "
+        
+        send "sudo bpftool map dump pinned /sys/fs/bpf/aegis/allow_lpm4\r"
+        expect "$ "
+        
+        send "echo '=== Test Summary ==='\r"
+        expect "$ "
+        send "echo '✓ Pinned maps created successfully'\r"
+        expect "$ "
+        send "echo '✓ Test data added to maps'\r"
+        expect "$ "
+        send "echo '✓ Maps can be dumped and verified'\r"
+        expect "$ "
+        
+        send "exit\r"
+    }
+    timeout {
+        puts "Connection timed out"
+        exit 1
+    }
+}

@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium-blue?style=flat&logo=linux)](https://cilium.io/)
 
-A **production-ready eBPF agent** for the AegisFlux platform that runs on Linux hosts to manage and execute eBPF programs with enterprise-grade security, monitoring, and reliability features.
+A **An Exploratory eBPF agent** for the AegisFlux platform that runs on Linux hosts to manage and execute eBPF programs with enterprise-grade security, monitoring, and reliability features.
 
 ## 📋 Table of Contents
 

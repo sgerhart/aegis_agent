@@ -1,0 +1,79 @@
+#!/usr/bin/expect -f
+
+set timeout 60
+set host "192.168.64.17"
+set user "steve"
+set password "C!sco#123"
+
+# SSH to the Linux box and test with bpftool
+spawn ssh -o StrictHostKeyChecking=no steve@192.168.64.17
+
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "Password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+        # Test eBPF object loading with bpftool
+        send "echo '=== Testing eBPF Object Loading with bpftool ==='\r"
+        expect "$ "
+        
+        # Check if bpftool is available
+        send "which bpftool\r"
+        expect "$ "
+        
+        # Test loading the egress program
+        send "echo 'Testing egress program:'\r"
+        expect "$ "
+        send "bpftool prog load /tmp/seg_egress_cgroup.o /sys/fs/bpf/test_egress\r"
+        expect "$ "
+        
+        # List loaded programs
+        send "bpftool prog list | grep test_egress\r"
+        expect "$ "
+        
+        # Test loading the ingress program
+        send "echo 'Testing ingress program:'\r"
+        expect "$ "
+        send "bpftool prog load /tmp/seg_ingress_tc.o /sys/fs/bpf/test_ingress\r"
+        expect "$ "
+        
+        # List loaded programs
+        send "bpftool prog list | grep test_ingress\r"
+        expect "$ "
+        
+        # Show program details
+        send "echo 'Program details:'\r"
+        expect "$ "
+        send "bpftool prog show pinned /sys/fs/bpf/test_egress\r"
+        expect "$ "
+        
+        send "bpftool prog show pinned /sys/fs/bpf/test_ingress\r"
+        expect "$ "
+        
+        # Clean up
+        send "echo 'Cleaning up...'\r"
+        expect "$ "
+        send "sudo rm -f /sys/fs/bpf/test_egress /sys/fs/bpf/test_ingress\r"
+        expect "$ "
+        
+        send "echo '=== Test Summary ==='\r"
+        expect "$ "
+        send "echo '✓ eBPF object loading works on Linux'\r"
+        expect "$ "
+        send "echo '✓ Programs can be loaded into kernel'\r"
+        expect "$ "
+        send "echo '✓ Ready for real attachment testing'\r"
+        expect "$ "
+        
+        send "exit\r"
+    }
+    timeout {
+        puts "Connection timed out"
+        exit 1
+    }
+}

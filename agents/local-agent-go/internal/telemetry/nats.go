@@ -122,6 +122,11 @@ func (t *Telemetry) emitEvent(event TelemetryEvent) error {
 	return t.nc.Publish("agent.telemetry", b)
 }
 
+// GetConn returns the NATS connection
+func (t *Telemetry) GetConn() *nats.Conn {
+	return t.nc
+}
+
 // Close closes the NATS connection
 func (t *Telemetry) Close() error {
 	if t.nc != nil {
