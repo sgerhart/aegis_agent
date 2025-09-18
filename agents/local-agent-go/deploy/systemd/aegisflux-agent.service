@@ -1,0 +1,47 @@
+[Unit]
+Description=AegisFlux eBPF Agent (Go)
+Documentation=https://github.com/sgerhart/aegis_agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/aegisflux/bin/aegisflux-agent
+ExecReload=/bin/kill -HUP $MAINPID
+Environment=AGENT_REGISTRY_URL=http://localhost:8090
+Environment=NATS_URL=nats://localhost:4222
+Environment=AGENT_HTTP_ADDR=:7070
+Environment=AGENT_POLL_INTERVAL=10s
+Environment=AGENT_BUNDLES_DIR=/opt/aegisflux/bundles
+Environment=AGENT_HOST_ID=host-unknown
+Environment=VAULT_URL=
+Environment=VAULT_TOKEN=
+Environment=DEV_PUBLIC_KEY_PATH=
+AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_BPF CAP_NET_ADMIN CAP_SYS_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aegisflux/bundles /var/log/aegisflux
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+Restart=always
+RestartSec=3
+StartLimitInterval=60
+StartLimitBurst=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aegisflux-agent
+
+[Install]
+WantedBy=multi-user.target

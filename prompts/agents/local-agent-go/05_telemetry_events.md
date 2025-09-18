@@ -1,0 +1,1 @@
+- Emit loaded/unloaded/error/rolled_back telemetry events.
