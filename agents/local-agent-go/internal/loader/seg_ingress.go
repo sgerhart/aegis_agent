@@ -1,2 +1,2 @@
 package loader
-// TODO: attach tc ingress program with github.com/cilium/ebpf/link
+// TODO: attach TC ingress classifier; ensure clsact qdisc; manage LPM maps

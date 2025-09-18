@@ -1,0 +1,3 @@
+- Implement cgroup connect4/6 and TC ingress attach using github.com/cilium/ebpf/link.
+- Manage pinned maps in /sys/fs/bpf/aegis and provide atomic map updates (generation swap).
+- Report attached hooks/interfaces via /status.
