@@ -1,0 +1,1 @@
+Run end-to-end test with allow edges and drops.

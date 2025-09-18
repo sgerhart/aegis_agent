@@ -1,0 +1,54 @@
+[Unit]
+Description=AegisFlux Segmentation Agent (Go)
+Documentation=https://github.com/sgerhart/aegis_agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/segmentation/bin/segmentation-agent
+ExecReload=/bin/kill -HUP $MAINPID
+Environment=AGENT_HTTP_ADDR=:8080
+Environment=AGENT_POLL_INTERVAL=30s
+Environment=AGENT_HOST_ID=segmentation-host
+Environment=NATS_URL=nats://localhost:4222
+Environment=CLANG_PATH=clang
+Environment=BPFTOOL_PATH=bpftool
+Environment=BTF_PATH=/sys/kernel/btf/vmlinux
+Environment=BUILD_OUTPUT_DIR=/opt/segmentation/ebpf
+
+# eBPF capabilities
+AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_BPF CAP_NET_ADMIN CAP_SYS_ADMIN
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/segmentation/ebpf /var/log/segmentation
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Restart policy
+Restart=always
+RestartSec=3
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=segmentation-agent
+
+[Install]
+WantedBy=multi-user.target
