@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "keys": [
+    {
+      "key_id": "aegis-backend-1",
+      "algorithm": "Ed25519",
+      "public_key": "placeholder-key-will-be-replaced",
+      "created_at": "2025-01-01T00:00:00Z",
+      "metadata": {
+        "generated_by": "aegis-agent",
+        "key_size": 32,
+        "description": "Initial backend signing key"
+      }
+    }
+  ],
+  "updated_at": "2025-01-01T00:00:00Z"
+}
