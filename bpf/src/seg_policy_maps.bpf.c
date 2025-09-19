@@ -5,6 +5,11 @@
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/bpf_tracing.h>
+
+#ifndef PIN_GLOBAL_NS
+#define PIN_GLOBAL_NS 2
+#endif
 
 // Policy edge structure for network segmentation
 struct policy_edge {
@@ -51,7 +56,7 @@ struct {
 } policy_edges SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 512);
     __type(key, struct allow_cidr);
     __type(value, __u8);

@@ -4,16 +4,20 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/vishvananda/netlink"
 )
 
 // SegIngressLoader handles ingress segmentation eBPF programs
 type SegIngressLoader struct {
 	collection *ebpf.Collection
 	programs   map[string]*ebpf.Program
-	qdisc      interface{} // Mock qdisc
+	links      map[string]link.Link
+	qdisc      *netlink.GenericQdisc
 }
 
 // NewSegIngressLoader creates a new ingress segmentation loader
@@ -25,6 +29,7 @@ func NewSegIngressLoader() *SegIngressLoader {
 
 	return &SegIngressLoader{
 		programs: make(map[string]*ebpf.Program),
+		links:    make(map[string]link.Link),
 	}
 }
 
@@ -77,12 +82,25 @@ func (sil *SegIngressLoader) AttachTCClassifier(ctx context.Context, ifaceName s
 		return fmt.Errorf("program 'seg_ingress_cls' is not a SchedCLS type, got %v", prog.Type())
 	}
 
-	// Attach the TC classifier using netlink
-	// For now, we'll store the program for later attachment
-	log.Printf("[seg_ingress] Storing seg_ingress_cls program for interface %s", ifaceName)
+	// Get interface index
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get interface %s: %w", ifaceName, err)
+	}
 
-	// Store the program
+	// Attach the TC classifier using link.AttachTCX
+	link, err := link.AttachTCX(link.TCXOptions{
+		Program:   prog,
+		Interface: iface.Index,
+		Attach:    ebpf.AttachTCXIngress,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach seg_ingress_cls to interface %s: %w", ifaceName, err)
+	}
+
+	// Store the program and link
 	sil.programs["seg_ingress_cls"] = prog
+	sil.links["seg_ingress_cls"] = link
 	log.Printf("[seg_ingress] Successfully attached seg_ingress_cls to %s", ifaceName)
 	return nil
 }
@@ -104,12 +122,25 @@ func (sil *SegIngressLoader) AttachTCAction(ctx context.Context, ifaceName strin
 		return fmt.Errorf("program 'seg_ingress_action' is not a SchedCLS type, got %v", prog.Type())
 	}
 
-	// Attach the TC action using netlink
-	// For now, we'll store the program for later attachment
-	log.Printf("[seg_ingress] Storing seg_ingress_action program for interface %s", ifaceName)
+	// Get interface index
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get interface %s: %w", ifaceName, err)
+	}
 
-	// Store the program
+	// Attach the TC action using link.AttachTCX
+	link, err := link.AttachTCX(link.TCXOptions{
+		Program:   prog,
+		Interface: iface.Index,
+		Attach:    ebpf.AttachTCXEgress,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach seg_ingress_action to interface %s: %w", ifaceName, err)
+	}
+
+	// Store the program and link
 	sil.programs["seg_ingress_action"] = prog
+	sil.links["seg_ingress_action"] = link
 	log.Printf("[seg_ingress] Successfully attached seg_ingress_action to %s", ifaceName)
 	return nil
 }
@@ -133,7 +164,16 @@ func (sil *SegIngressLoader) AttachAll(ctx context.Context, ifaceName string) er
 // DetachAll detaches all attached programs
 func (sil *SegIngressLoader) DetachAll() error {
 	log.Printf("[seg_ingress] Detaching all programs")
+	
+	// Close all links
+	for name, link := range sil.links {
+		if err := link.Close(); err != nil {
+			log.Printf("[seg_ingress] Error closing link %s: %v", name, err)
+		}
+	}
+	
 	sil.programs = make(map[string]*ebpf.Program)
+	sil.links = make(map[string]link.Link)
 	return nil
 }
 

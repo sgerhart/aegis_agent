@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -47,8 +46,6 @@ type PolicyStats struct {
 }
 
 func main() {
-	ctx := context.Background()
-	
 	// Remove memlock limit
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatalf("Failed to remove memlock rlimit: %v", err)

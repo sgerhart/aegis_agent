@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,23 +41,68 @@ func NewClient(base, hostID string) *Client {
 
 func (c *Client) FetchAssignments(ctx context.Context) ([]Assignment, error) {
 	url := fmt.Sprintf("%s/artifacts/for-host/%s", c.base, c.hostID)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	
+	// Log the request details
+	log.Printf("[registry] Making request to: %s", url)
+	log.Printf("[registry] Host ID: %s", c.hostID)
+	log.Printf("[registry] Base URL: %s", c.base)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		log.Printf("[registry] Failed to create request: %v", err)
+		return nil, err
+	}
+	
+	// Log request headers
+	log.Printf("[registry] Request headers: %v", req.Header)
+	
 	resp, err := c.http.Do(req)
 	if err != nil {
+		log.Printf("[registry] Request failed: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	
+	// Log response details
+	log.Printf("[registry] Response status: %s", resp.Status)
+	log.Printf("[registry] Response headers: %v", resp.Header)
+	
 	if resp.StatusCode == 404 {
+		log.Printf("[registry] No assignments found (404)")
 		return []Assignment{}, nil
 	}
 	if resp.StatusCode != 200 {
+		log.Printf("[registry] Registry error: %s", resp.Status)
 		return nil, fmt.Errorf("registry %s: %s", url, resp.Status)
 	}
-	var response AssignmentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode registry response: %w", err)
+	
+	// Read the response body to check format
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[registry] Failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read registry response: %w", err)
 	}
-	return response.Artifacts, nil
+	
+	// Log raw response body
+	log.Printf("[registry] Raw response body: %s", string(body))
+	log.Printf("[registry] Response body length: %d bytes", len(body))
+	
+	// Try to decode as AssignmentsResponse first
+	var response AssignmentsResponse
+	if err := json.Unmarshal(body, &response); err == nil {
+		log.Printf("[registry] Successfully decoded as AssignmentsResponse: %+v", response)
+		return response.Artifacts, nil
+	}
+	
+	// If that fails, try to decode as direct array
+	var assignments []Assignment
+	if err := json.Unmarshal(body, &assignments); err == nil {
+		log.Printf("[registry] Successfully decoded as direct array: %+v", assignments)
+		return assignments, nil
+	}
+	
+	log.Printf("[registry] Failed to decode response as either format")
+	return nil, fmt.Errorf("failed to decode registry response: %w", err)
 }
 
 func (c *Client) DownloadBundle(ctx context.Context, assignment Assignment, destDir string) (string, error) {

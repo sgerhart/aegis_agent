@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agents/local-agent-go/internal/capability"
+	"agents/local-agent-go/internal/config"
 	"agents/local-agent-go/internal/drift"
 	"agents/local-agent-go/internal/guard"
 	"agents/local-agent-go/internal/loader"
@@ -60,13 +61,16 @@ func getProjectRoot() string {
 func main() {
 	regURL := getenv("AGENT_REGISTRY_URL", "http://localhost:8090")
 	natsURL := getenv("NATS_URL", "nats://localhost:4222")
-	hostID := getenv("AGENT_HOST_ID", "host-unknown")
+	hostID := config.DeriveHostID()
 	pollEvery, _ := time.ParseDuration(getenv("AGENT_POLL_INTERVAL", "10s"))
 	httpAddr := getenv("AGENT_HTTP_ADDR", ":7070")
 	vaultURL := getenv("VAULT_URL", "")
 	vaultToken := getenv("VAULT_TOKEN", "")
 	devPubKeyPath := getenv("DEV_PUBLIC_KEY_PATH", "")
 	driftCheckInterval, _ := time.ParseDuration(getenv("DRIFT_CHECK_INTERVAL", "30s"))
+
+	// Log the resolved host_id at startup
+	log.Printf("[agent] resolved host_id: %s", hostID)
 
 	reg := registry.NewClient(regURL, hostID)
 	tel := telemetry.New(natsURL, hostID)
@@ -148,7 +152,7 @@ func main() {
 	defer cpuWatcher.Stop()
 
 	mux := http.NewServeMux()
-	status.RegisterHandlers(mux, stat, verifier, segEgressLoader, segIngressLoader, cpuWatcher)
+	status.RegisterHandlers(mux, stat, verifier, segEgressLoader, segIngressLoader, cpuWatcher, hostID)
 	srv := &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
 		log.Printf("[agent] status server listening on %s", httpAddr)
@@ -173,6 +177,9 @@ func main() {
 	defer t.Stop()
 
 	log.Printf("[agent] starting; host_id=%s registry=%s nats=%s", hostID, regURL, natsURL)
+	log.Printf("[agent] HTTP status server will be available at: http://localhost%s/status", httpAddr)
+	log.Printf("[agent] Registry client configured with base URL: %s", regURL)
+	log.Printf("[agent] NATS client configured with URL: %s", natsURL)
 	
 	// Probe system capabilities
 	capabilities, err := capProbe.ProbeCapabilities(ctx)

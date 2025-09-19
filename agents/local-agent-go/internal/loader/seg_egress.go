@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 )
 
@@ -14,6 +15,7 @@ import (
 type SegEgressLoader struct {
 	collection *ebpf.Collection
 	programs   map[string]*ebpf.Program
+	links      map[string]link.Link
 }
 
 // NewSegEgressLoader creates a new egress segmentation loader
@@ -25,6 +27,7 @@ func NewSegEgressLoader() *SegEgressLoader {
 
 	return &SegEgressLoader{
 		programs: make(map[string]*ebpf.Program),
+		links:    make(map[string]link.Link),
 	}
 }
 
@@ -71,12 +74,19 @@ func (sel *SegEgressLoader) AttachCgroupConnect4(ctx context.Context, cgroupPath
 	}
 	defer cgroupFile.Close()
 
-	// Attach the program to the cgroup
-	// For now, we'll store the program for later attachment
-	log.Printf("[seg_egress] Storing seg_connect4 program for cgroup %s", cgroupPath)
+	// Attach the program to the cgroup using link.AttachCgroup
+	link, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInet4Connect,
+		Program: prog,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach seg_connect4 to cgroup %s: %w", cgroupPath, err)
+	}
 
-	// Store the program
+	// Store the program and link
 	sel.programs["seg_connect4"] = prog
+	sel.links["seg_connect4"] = link
 	log.Printf("[seg_egress] Successfully attached seg_connect4 to cgroup %s", cgroupPath)
 	return nil
 }
@@ -105,12 +115,19 @@ func (sel *SegEgressLoader) AttachCgroupConnect6(ctx context.Context, cgroupPath
 	}
 	defer cgroupFile.Close()
 
-	// Attach the program to the cgroup
-	// For now, we'll store the program for later attachment
-	log.Printf("[seg_egress] Storing seg_connect6 program for cgroup %s", cgroupPath)
+	// Attach the program to the cgroup using link.AttachCgroup
+	link, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInet6Connect,
+		Program: prog,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach seg_connect6 to cgroup %s: %w", cgroupPath, err)
+	}
 
-	// Store the program
+	// Store the program and link
 	sel.programs["seg_connect6"] = prog
+	sel.links["seg_connect6"] = link
 	log.Printf("[seg_egress] Successfully attached seg_connect6 to cgroup %s", cgroupPath)
 	return nil
 }
@@ -134,7 +151,16 @@ func (sel *SegEgressLoader) AttachAll(ctx context.Context, cgroupPath string) er
 // DetachAll detaches all attached programs
 func (sel *SegEgressLoader) DetachAll() error {
 	log.Printf("[seg_egress] Detaching all programs")
+	
+	// Close all links
+	for name, link := range sel.links {
+		if err := link.Close(); err != nil {
+			log.Printf("[seg_egress] Error closing link %s: %v", name, err)
+		}
+	}
+	
 	sel.programs = make(map[string]*ebpf.Program)
+	sel.links = make(map[string]link.Link)
 	return nil
 }
 

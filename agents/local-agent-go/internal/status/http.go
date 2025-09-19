@@ -131,7 +131,7 @@ func (s *Status) RollbackToPreviousGeneration() []string {
 	return artifacts
 }
 
-func RegisterHandlers(mux *http.ServeMux, s *Status, verifier Verifier, segEgressLoader SegEgressLoader, segIngressLoader SegIngressLoader, cpuWatcher CPUWatcher){
+func RegisterHandlers(mux *http.ServeMux, s *Status, verifier Verifier, segEgressLoader SegEgressLoader, segIngressLoader SegIngressLoader, cpuWatcher CPUWatcher, hostID string){
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request){
 		w.Header().Set("content-type","application/json"); w.Write([]byte(`{"ok":true}`))
 	})
@@ -139,6 +139,7 @@ func RegisterHandlers(mux *http.ServeMux, s *Status, verifier Verifier, segEgres
 		w.Header().Set("content-type","application/json")
 		
 		statusData := map[string]any{
+			"host_id": hostID,
 			"loaded": s.Loaded, 
 			"cpu_pct": GetCPU(),
 			"active_gen": s.GetActiveGeneration(),

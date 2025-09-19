@@ -3,6 +3,7 @@ package telemetry
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -37,7 +38,13 @@ type TelemetryEvent struct {
 }
 
 func New(natsURL, hostID string) *Telemetry {
-	nc, _ := nats.Connect(natsURL)
+	log.Printf("[telemetry] Connecting to NATS at: %s", natsURL)
+	nc, err := nats.Connect(natsURL)
+	if err != nil {
+		log.Printf("[telemetry] Failed to connect to NATS: %v", err)
+		return &Telemetry{nc: nil, hostID: hostID}
+	}
+	log.Printf("[telemetry] Successfully connected to NATS")
 	return &Telemetry{nc: nc, hostID: hostID}
 }
 
@@ -111,15 +118,28 @@ func (t *Telemetry) EmitMetrics(artifactID string, drops, errors int, cpuPct flo
 // emitEvent sends a telemetry event to NATS
 func (t *Telemetry) emitEvent(event TelemetryEvent) error {
 	if t.nc == nil {
+		log.Printf("[telemetry] NATS not connected, cannot emit event")
 		return fmt.Errorf("nats not connected")
 	}
 	
+	log.Printf("[telemetry] Emitting event: %+v", event)
+	
 	b, err := json.Marshal(event)
 	if err != nil {
+		log.Printf("[telemetry] Failed to marshal event: %v", err)
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 	
-	return t.nc.Publish("agent.telemetry", b)
+	log.Printf("[telemetry] Publishing to subject 'agent.telemetry' with data: %s", string(b))
+	
+	err = t.nc.Publish("agent.telemetry", b)
+	if err != nil {
+		log.Printf("[telemetry] Failed to publish event: %v", err)
+		return err
+	}
+	
+	log.Printf("[telemetry] Successfully published event")
+	return nil
 }
 
 // GetConn returns the NATS connection
