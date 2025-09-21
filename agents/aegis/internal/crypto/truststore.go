@@ -216,3 +216,4 @@ func (tsm *TrustStoreManager) CreateInitialTrustStore() (*models.TrustedKey, ed2
 func (tsm *TrustStoreManager) GetVerifier() *Verifier {
 	return tsm.verifier
 }
+

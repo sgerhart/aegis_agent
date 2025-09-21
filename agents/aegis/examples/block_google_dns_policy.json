@@ -1,0 +1,32 @@
+{
+  "id": "assignment-block-google-dns",
+  "host_id": "test-host",
+  "policy_id": "block-google-dns-policy",
+  "version": "1.0.0",
+  "created_at": "2025-09-19T16:00:00Z",
+  "expires_at": "2025-09-20T16:00:00Z",
+  "selectors": {
+    "platform": "linux",
+    "arch": "arm64",
+    "environment": "test"
+  },
+  "dry_run": false,
+  "priority": 200,
+  "bundle": {
+    "id": "bundle-block-google-dns",
+    "hash": "sha256:block-google-dns-hash",
+    "sig": "block-google-dns-signature",
+    "algo": "Ed25519",
+    "created_at": "2025-09-19T16:00:00Z",
+    "key_id": "aegis-backend-1",
+    "content": "eyJlZ3Jlc3NfcG9saWNpZXMiOltdLCJpbmdyZXNzX3BvbGljaWVzIjpbeyJpZCI6MSwic3JjX2lwIjowLCJzcmNfbWFzayI6MCwiZHN0X3BvcnQiOjAsInByb3RvY29sIjowLCJhY3Rpb24iOjAsInByaW9yaXR5IjoyMDB9XSwicG9saWN5X2VkZ2VzIjpbeyJpZCI6MSwic3JjX2lwIjowLCJkc3RfaXAiOjEzNDc0NDA3Miwic3JjX21hc2siOjAsImRzdF9tYXNrIjo0Mjk0OTY3Mjk1LCJzcmNfcG9ydCI6MCwiZHN0X3BvcnQiOjAsInByb3RvY29sIjowLCJhY3Rpb24iOjAsInByaW9yaXR5IjoyMDAsInByb2Nlc3NfdWlkIjowLCJwcm9jZXNzX2dpZCI6MCwidGltZXN0YW1wIjoxNzM1Njk2MDAwMH1dLCJsZXRfY2lkcnMiOlt7InByZWZpeF9sZW4iOjMyLCJpcCI6MTM0NzQ0MDcyLCJhY3Rpb24iOjAsInByaW9yaXR5IjoyMDAsInRpbWVzdGFtcCI6MTczNTY5NjAwMDB9XSwibWV0YWRhdGEiOnsiZGVzY3JpcHRpb24iOiJCbG9jayBhbGwgdHJhZmZpYyB0byA4LjguOC44IChHb29nbGUgRE5TKSIsImNyZWF0b3IiOiJhZWdpcy1hZ2VudCIsInZlcnNpb24iOiIxLjAuMCIsInRhcmdldCI6IjguOC44LjgifX0="
+  },
+  "metadata": {
+    "description": "Block all connectivity to Google DNS (8.8.8.8) using eBPF",
+    "creator": "aegis-agent",
+    "environment": "test",
+    "target_ip": "8.8.8.8",
+    "policy_type": "network_blocking",
+    "enforcement_method": "ebpf"
+  }
+}

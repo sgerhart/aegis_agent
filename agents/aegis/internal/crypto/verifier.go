@@ -47,6 +47,11 @@ func (v *Verifier) loadTrustStore() error {
 		return err
 	}
 	
+	// Initialize trust store if nil
+	if v.trustStore == nil {
+		v.trustStore = &models.TrustStore{}
+	}
+	
 	if err := json.Unmarshal(data, v.trustStore); err != nil {
 		return fmt.Errorf("failed to parse trust store: %w", err)
 	}

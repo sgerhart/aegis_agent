@@ -1,0 +1,174 @@
+Cap 7.10 — Enforcement & Visibility
+Objectives
+
+Backend-pushed policy actually enforces (no more simulation).
+
+Mode switch per assignment: observe (log only) vs block (drop).
+
+Complete host visibility from the agent: process tree, exec events, sockets, and network flows.
+
+A. Enforcement (Agent)
+Wire policy → real eBPF maps → attached programs
+
+Maps (pin paths)
+
+/sys/fs/bpf/aegis/policy_edges — service-graph edges (u32 src → u32 dst bitmap or tuple)
+
+/sys/fs/bpf/aegis/allow_lpm4 — LPM trie for IPv4 CIDR allow/deny (key: prefix, value: verdict bitset)
+
+/sys/fs/bpf/aegis/mode — u32 (0 = observe, 1 = block) set per host by assignment
+
+Programs (already in tree)
+
+seg_ingress_tc.bpf.c (TC ingress): reads allow_lpm4 & policy_edges; returns TC_ACT_SHOT to drop
+
+cgroup_connect4.bpf.c (CG sock connect): can early-deny outbound connects
+
+Agent tasks
+
+Load the real pinned maps with cilium/ebpf and write policy entries (no simulation).
+
+Attach programs (if not already):
+
+tc qdisc add dev <IFACE> clsact
+
+tc filter add dev <IFACE> ingress bpf da obj seg_ingress_tc.bpf.o sec tc (program loader can do this via netlink or shell)
+
+bpftool cgroup attach /sys/fs/cgroup sock_create pinned <path> (if you use CG hooks)
+
+Implement mode map:
+
+mode=0: log decision + allow (observe)
+
+mode=1: log decision + drop (block)
+
+Minimal policy writer (Go, agent)
+
+Parse backend snapshot →
+
+Write LPM entries: cidr → {allow|deny}
+
+Write edges: (src, dst) pairs for flows
+
+Use atomic update pattern: write to shadow maps, then swap (or update generation counter) to avoid race conditions.
+
+Telemetry events (agent)
+
+verify_ok/failed, apply_ok/failed, enforce_decision (fields: prog, map, 5-tuple, verdict, reason), rollback
+
+Publish to NATS aegis.telemetry.host.<host_id>
+
+C. Modes (observe vs block)
+
+Agent decision logic (in loader or helper)
+
+Read /sys/fs/bpf/aegis/mode:
+
+observe: programs still classify, but return ALLOW; emit enforce_decision(verdict="observe_drop") for any would-be drop
+
+block: return DROP where policy denies
+
+This lets you toggle safely from observe → block without changing policies.
+
+D. Full Host Visibility
+Scope (MVP that’s powerful but lean)
+
+Process tree: parent/child relationships, start time, uid, cmdline
+
+Exec events: execve (binary path, args, uid, hash optional)
+
+Socket opens/connects: PID ↔ IP:port (ingress/egress)
+
+Network flows: summarized 5-tuple counters (packets/bytes, last_seen)
+
+Inventory snapshot: periodic /proc crawl to fill gaps and rebalance state
+
+Agent implementation
+
+eBPF sources
+
+Tracepoints / LSM / kprobe (choose what your kernel supports):
+
+sched_process_exec (exec events) or LSM bprm_check_security
+
+tcp_connect/inet_sock_set_state (connect/accept transitions)
+
+Ring buffer/perf buffer → userspace consumer
+
+Store in pinned maps (small indexes) + userspace cache (Go maps) for graph building
+
+Userspace collectors
+
+/proc snapshotter on interval (e.g., 30–60s):
+
+/proc/*/stat, /proc/*/cmdline, /proc/*/status, /proc/*/net/{tcp,udp}
+
+Merge with eBPF event stream; dedupe by (pid,start_time)
+
+Telemetry
+
+Periodic visibility frame to backend (NATS subject aegis.visibility.host.<host_id>):
+
+{
+  "host_id":"h-123",
+  "ts":"2025-09-19T13:00:01Z",
+  "procs":[{"pid":123,"ppid":1,"exe":"/usr/bin/sshd","uid":0,"args":"-D"}],
+  "flows":[{"pid":123,"laddr":"10.0.0.10:51234","raddr":"8.8.8.8:53","proto":"udp","dir":"egress","pkts":4,"bytes":512}]
+}
+
+
+Backend
+
+New visibility consumer (NATS → DB) + simple /agents/<id>/visibility/latest for UI later.
+
+
+aegis-agent/
+  internal/ebpf/
+    maps.go            # open/pin maps; helpers for LPM writes
+    attach.go          # tc + cgroup attach/detach (idempotent)
+    writer.go          # apply snapshot → maps; shadow-swap
+  internal/enforce/
+    mode.go            # read/write mode map (observe/block)
+    decision.go        # standardized decision/telemetry
+  internal/visibility/
+    exec_events.go     # ring buffer consumer
+    proc_snapshot.go   # /proc crawler
+    flows.go           # socket/flow aggregation
+  cmd/aegis/
+    main.go            # flags: --observe, --block, --iface, --no-tc, --no-cg
+  prompts/
+    agent_07_10_enforcement.md
+    agent_07_10_visibility.md
+
+
+prompts/agent_07_10_enforcement.md
+
+Open pinned maps (policy_edges, allow_lpm4, mode) via cilium/ebpf.
+
+Implement LPM writer: parse CIDR → prefixlen → key/value → Map.Update.
+
+Implement edges writer: (src,dst) → policy_edges.Update.
+
+Attach programs if missing (tc ingress on <iface>, cgroup sock_create):
+
+Ensure idempotent attach; create clsact if absent.
+
+Integrate assignment mode → write mode map (0/1).
+
+Replace simulation with real writes + telemetry (enforce_decision).
+
+Add CLI flags: --iface, --observe, --block, --dry-run (7.9 remains).
+
+Acceptance: block 8.8.8.8 in --block, log intent only in --observe.
+
+prompts/agent_07_10_visibility.md
+
+Add ring buffer consumer for exec events (pid, ppid, uid, exe, args).
+
+Implement /proc snapshotter merging with event stream.
+
+Track flows per PID; rollup counters (pkts/bytes, last_seen).
+
+Emit visibility frame on interval to NATS; include host_id.
+
+Acceptance: backend receives frames; contains non-empty procs + flows.

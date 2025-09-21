@@ -1,0 +1,68 @@
+{
+  "id": "network-segmentation-policy",
+  "name": "Production Network Segmentation",
+  "description": "Comprehensive network segmentation policy for production environment",
+  "type": "network",
+  "priority": 100,
+  "enabled": true,
+  "rules": [
+    {
+      "id": "deny-external-dns",
+      "action": "deny",
+      "priority": 10,
+      "conditions": [
+        {"field": "dest_ip", "operator": "eq", "value": "8.8.8.8"},
+        {"field": "protocol", "operator": "eq", "value": "tcp"}
+      ],
+      "metadata": {
+        "description": "Block TCP connections to Google DNS",
+        "category": "dns_security"
+      }
+    },
+    {
+      "id": "deny-cloudflare-dns",
+      "action": "deny", 
+      "priority": 11,
+      "conditions": [
+        {"field": "dest_ip", "operator": "eq", "value": "1.1.1.1"},
+        {"field": "protocol", "operator": "eq", "value": "tcp"}
+      ],
+      "metadata": {
+        "description": "Block TCP connections to Cloudflare DNS",
+        "category": "dns_security"
+      }
+    },
+    {
+      "id": "allow-internal-network",
+      "action": "allow",
+      "priority": 1,
+      "conditions": [
+        {"field": "dest_ip", "operator": "contains", "value": "192.168."},
+        {"field": "protocol", "operator": "eq", "value": "tcp"}
+      ],
+      "metadata": {
+        "description": "Allow internal network communications",
+        "category": "internal_access"
+      }
+    },
+    {
+      "id": "allow-https-outbound",
+      "action": "allow",
+      "priority": 5,
+      "conditions": [
+        {"field": "dest_port", "operator": "eq", "value": 443},
+        {"field": "protocol", "operator": "eq", "value": "tcp"}
+      ],
+      "metadata": {
+        "description": "Allow HTTPS outbound connections",
+        "category": "web_access"
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production",
+    "created_by": "aegis_admin",
+    "policy_version": "1.0",
+    "applies_to": ["web_servers", "app_servers"]
+  }
+}

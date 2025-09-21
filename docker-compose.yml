@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  registry:
+    image: nginx:alpine
+    container_name: aegis-registry
+    ports:
+      - "8090:80"
+    volumes:
+      - ./registry-data:/usr/share/nginx/html
+    command: >
+      sh -c "mkdir -p /usr/share/nginx/html/bundles &&
+             echo 'AegisFlux Registry Server' > /usr/share/nginx/html/index.html &&
+             nginx -g 'daemon off;'"
+
+  nats:
+    image: nats:2.9-alpine
+    container_name: aegis-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP monitoring
+    command: ["-js", "-m", "8222"]
+
+  vault:
+    image: vault:1.15
+    container_name: aegis-vault
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK

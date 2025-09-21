@@ -150,3 +150,4 @@ type ErrInvalidTTL string
 func (e ErrInvalidTTL) Error() string {
 	return "invalid TTL: " + string(e)
 }
+

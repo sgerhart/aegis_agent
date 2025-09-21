@@ -1,104 +1,107 @@
-# AegisFlux eBPF CO-RE Build System
-# Requires clang/llvm >= 14 and kernel headers
+# AEGIS eBPF Agent Build System
+# Builds eBPF programs for enforcement, observability, and telemetry
 
 CLANG ?= clang
-LLC ?= llc
-ARCH ?= x86
-KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+LLVM_STRIP ?= llvm-strip
 BPFTOOL ?= bpftool
 
+# Architecture detection
+ARCH := $(shell uname -m | sed 's/x86_64/x86_64/' | sed 's/aarch64/arm64/')
+
+# Directories
+SRC_DIR := src
+BPF_DIR := bpf
+VMLINUX_DIR := include
+
+# eBPF source files
+ENFORCEMENT_SRC := $(SRC_DIR)/aegis_enforcer.bpf.c
+OBSERVABILITY_SRC := $(SRC_DIR)/aegis_observer.bpf.c
+
+# eBPF object files
+ENFORCEMENT_OBJ := $(BPF_DIR)/aegis_enforcer.o
+OBSERVABILITY_OBJ := $(BPF_DIR)/aegis_observer.o
+
+# All targets
+ALL_OBJS := $(ENFORCEMENT_OBJ) $(OBSERVABILITY_OBJ)
+
 # Compiler flags
-CLANG_FLAGS = -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
-	-Wno-unused-value -Wno-pointer-sign \
-	-Wno-compare-distinct-pointer-types \
-	-Wno-gnu-variable-sized-type-not-at-end \
-	-Wno-address-of-packed-member -Wno-tautological-compare \
-	-Wno-unknown-warning-option \
-	-fno-stack-protector
-
-# Add kernel headers if available
-ifneq ($(wildcard $(KERNEL_SRC)),)
-CLANG_FLAGS += -I$(KERNEL_SRC)/arch/$(ARCH)/include \
-	-I$(KERNEL_SRC)/arch/$(ARCH)/include/generated \
-	-I$(KERNEL_SRC)/include \
-	-I$(KERNEL_SRC)/include/generated \
-	-I$(KERNEL_SRC)/arch/$(ARCH)/include/uapi \
-	-I$(KERNEL_SRC)/arch/$(ARCH)/include/generated/uapi \
-	-I$(KERNEL_SRC)/include/uapi \
-	-I$(KERNEL_SRC)/include/generated/uapi
-else
-# Use vmlinux.h for CO-RE compilation
-CLANG_FLAGS += -I./include
-endif
-
-# Source files
-SOURCES = seg_egress_cgroup.bpf.c seg_ingress_tc.bpf.c seg_policy_maps.bpf.c
-OBJECTS = $(SOURCES:.c=.o)
+CFLAGS := -g -O2 -Wall -Werror
+CFLAGS += -target bpf
+CFLAGS += -D__TARGET_ARCH_$(ARCH)
+CFLAGS += -I$(VMLINUX_DIR)
+CFLAGS += -I/usr/include
+CFLAGS += -I/usr/include/$(shell uname -m)-linux-gnu
 
 # Default target
-all: $(OBJECTS)
+.PHONY: all clean install check-deps vmlinux
 
-# Build individual object files
-%.o: src/%.c
-	@echo "Building $@..."
-	$(CLANG) $(CLANG_FLAGS) -c $< -o $@
-	@echo "Generated $@"
+all: check-deps $(ALL_OBJS)
 
-# Clean build artifacts
-clean:
-	rm -f *.o *.skel.h
-
-# Verify object files
-verify: $(OBJECTS)
-	@echo "Verifying BPF object files..."
-	@for obj in $(OBJECTS); do \
-		echo "Checking $$obj:"; \
-		file $$obj; \
-		echo "  ✓ BPF object file generated"; \
-	done
-
-# Generate skeleton headers
-skeleton: $(OBJECTS)
-	@echo "Generating skeleton headers..."
-	@echo "Note: Skeleton generation requires bpftool (not available on macOS)"
-	@echo "Skipping skeleton generation..."
-
-# Install headers to include directory
-install-headers: skeleton
-	@echo "Installing skeleton headers..."
-	mkdir -p ../agents/local-agent-go/internal/loader/include
-	cp *.skel.h ../agents/local-agent-go/internal/loader/include/
-
-# Full build with verification
-build: all verify skeleton install-headers
-	@echo "Build complete!"
+# Create vmlinux.h if it doesn't exist
+vmlinux:
+	@echo "Generating vmlinux.h for $(ARCH)..."
+	@mkdir -p $(VMLINUX_DIR)
+	@if [ ! -f $(VMLINUX_DIR)/vmlinux.h ]; then \
+		$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX_DIR)/vmlinux.h; \
+	fi
 
 # Check dependencies
 check-deps:
-	@echo "Checking build dependencies..."
+	@echo "Checking eBPF build dependencies..."
 	@command -v $(CLANG) >/dev/null 2>&1 || { echo "clang not found"; exit 1; }
-	@echo "clang found ✓"
-	@echo "Note: bpftool and kernel headers not required for basic compilation"
+	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "bpftool not found"; exit 1; }
+	@test -f /usr/include/linux/bpf.h || { echo "linux headers not found"; exit 1; }
+	@test -f /usr/include/bpf/bpf_helpers.h || { echo "libbpf-dev not found"; exit 1; }
+	@echo "✅ All dependencies found"
 
-# Show help
+# Create directories
+$(BPF_DIR):
+	mkdir -p $(BPF_DIR)
+
+# Build enforcement eBPF program
+$(ENFORCEMENT_OBJ): $(ENFORCEMENT_SRC) | $(BPF_DIR) vmlinux
+	@echo "Building AEGIS enforcement eBPF program..."
+	$(CLANG) $(CFLAGS) -c $< -o $@
+	@echo "✅ Built $@"
+
+# Build observability eBPF program  
+$(OBSERVABILITY_OBJ): $(OBSERVABILITY_SRC) | $(BPF_DIR) vmlinux
+	@echo "Building AEGIS observability eBPF program..."
+	$(CLANG) $(CFLAGS) -c $< -o $@
+	@echo "✅ Built $@"
+
+# Install to target system (used by deployment scripts)
+install: all
+	@echo "Installing AEGIS eBPF programs..."
+	@mkdir -p /opt/aegis/ebpf
+	cp $(ALL_OBJS) /opt/aegis/ebpf/
+	@echo "✅ Installed eBPF programs to /opt/aegis/ebpf/"
+
+# Clean build artifacts
+clean:
+	rm -rf $(BPF_DIR)/*.o
+	rm -rf $(VMLINUX_DIR)/vmlinux.h
+	@echo "✅ Cleaned build artifacts"
+
+# Show build info
+info:
+	@echo "AEGIS eBPF Build Configuration:"
+	@echo "  Architecture: $(ARCH)"
+	@echo "  Clang: $(CLANG)"
+	@echo "  BPFTool: $(BPFTOOL)"
+	@echo "  Source Dir: $(SRC_DIR)"
+	@echo "  Object Dir: $(BPF_DIR)"
+	@echo "  Targets: $(ALL_OBJS)"
+
+# Help target
 help:
-	@echo "AegisFlux eBPF CO-RE Build System"
+	@echo "AEGIS eBPF Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all          - Build all BPF object files"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  verify       - Verify generated object files"
-	@echo "  skeleton     - Generate skeleton headers"
-	@echo "  install-headers - Install skeleton headers to agent"
-	@echo "  build        - Full build with verification"
-	@echo "  check-deps   - Check build dependencies"
-	@echo "  help         - Show this help"
-	@echo ""
-	@echo "Environment variables:"
-	@echo "  CLANG        - clang compiler path (default: clang)"
-	@echo "  LLC          - llc compiler path (default: llc)"
-	@echo "  ARCH         - target architecture (default: x86)"
-	@echo "  KERNEL_SRC   - kernel source path (default: /lib/modules/\$(uname -r)/build)"
-	@echo "  BPFTOOL      - bpftool path (default: bpftool)"
-
-.PHONY: all clean verify skeleton install-headers build check-deps help
+	@echo "  all        - Build all eBPF programs"
+	@echo "  clean      - Clean build artifacts"
+	@echo "  install    - Install to /opt/aegis/ebpf/"
+	@echo "  check-deps - Verify build dependencies"
+	@echo "  vmlinux    - Generate vmlinux.h"
+	@echo "  info       - Show build configuration"
+	@echo "  help       - Show this help"

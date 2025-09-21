@@ -1,0 +1,30 @@
+{
+  "id": "assignment-001",
+  "host_id": "test-host",
+  "policy_id": "network-segmentation-policy",
+  "version": "1.0.0",
+  "created_at": "2025-01-01T00:00:00Z",
+  "expires_at": "2025-01-02T00:00:00Z",
+  "selectors": {
+    "platform": "linux",
+    "arch": "arm64",
+    "capabilities": "ebpf,tc,cgroup"
+  },
+  "dry_run": false,
+  "priority": 100,
+  "bundle": {
+    "id": "bundle-001",
+    "hash": "sha256:example-hash",
+    "sig": "example-signature",
+    "algo": "Ed25519",
+    "created_at": "2025-01-01T00:00:00Z",
+    "key_id": "aegis-backend-1",
+    "content": "eyJlZ3Jlc3NfcG9saWNpZXMiOlt7ImlkIjoxLCJwcm9jZXNzX3VpZCI6MTAwMCwicHJvY2Vzc19naWQiOjEwMDAsImFsbG93ZWRfcG9ydHMiOls4MCw0NDMsODA4MF0sImJsb2NrZWRfcG9ydHMiOlsyMiwyMywyNTJdLCJhY3Rpb24iOjEsInByaW9yaXR5IjoxMDB9XSwiaW5ncmVzc19wb2xpY2llcyI6W3siaWQiOjEsInNyY19pcCI6MTkyMTY4MTY4LCJzcmNfbWFzayI6MjU1MjU1MjU1LCJkc3RfcG9ydCI6ODAsInByb3RvY29sIjoxNywiYWN0aW9uIjoxLCJwcmlvcml0eSI6MTAwfV0sInBvbGljeV9lZGdlcyI6W3siaWQiOjEsInNyY19pcCI6MTkyMTY4MTY4LCJkc3RfaXAiOjE5MjE2ODE2OSwic3JjX21hc2siOjI1NTI1NTI1NSwiZHN0X21hc2siOjI1NTI1NTI1NSwic3JjX3BvcnQiOjgwLCJkc3RfcG9ydCI6ODAsInByb3RvY29sIjoxNywiYWN0aW9uIjoxLCJwcmlvcml0eSI6MTAwLCJwcm9jZXNzX3VpZCI6MTAwMCwicHJvY2Vzc19naWQiOjEwMDAsInRpbWVzdGFtcCI6MTczNTY5NjAwMDB9XSwibGV0X2NpZHJzIjpbeyJwcmVmaXhfbGVuIjoyNCwiaXAiOjE5MjE2ODE2OCwiYWN0aW9uIjoxLCJwcmlvcml0eSI6MTAwLCJ0aW1lc3RhbXAiOjE3MzU2OTYwMDB9XSwibWV0YWRhdGEiOnsiZGVzY3JpcHRpb24iOiJOZXR3b3JrIHNlZ21lbnRhdGlvbiBwb2xpY3kgZm9yIHRlc3QgaG9zdCIsImNyZWF0b3IiOiJhZWdpcy1hZ2VudCIsInZlcnNpb24iOiIxLjAuMCJ9fQ=="
+  },
+  "metadata": {
+    "description": "Example network segmentation policy",
+    "creator": "aegis-agent",
+    "environment": "test"
+  }
+}
+
