@@ -11,7 +11,8 @@ type MapManagerInterface interface {
 	Close() error
 }
 
-// Ensure both types implement the interface
+// Ensure all types implement the interface
 var _ MapManagerInterface = (*MapManager)(nil)
 var _ MapManagerInterface = (*MockMapManager)(nil)
+var _ MapManagerInterface = (*AdvancedMapManager)(nil)
 

@@ -46,6 +46,7 @@ type PollingClient struct {
 	rollbackMgr  *rollout.RollbackManager
 	historyMgr   *policy.PolicyHistoryManager
 	auditLogger  *telemetry.AuditLogger
+	mapCoordinator *policy.MapCoordinator
 }
 
 // RegistrationRequest represents Phase 1 registration
@@ -123,6 +124,13 @@ func NewPollingClient(hostID, registryURL, actionsURL, natsURL string, telemetry
 	rollbackMgr := rollout.NewRollbackManager("/var/lib/aegis/rollback_history.json", 100)
 	historyMgr := policy.NewPolicyHistoryManager("/var/lib/aegis/policy_history.json", 500)
 	auditLogger := telemetry.NewAuditLogger("/var/lib/aegis/audit_log.json", 1000)
+	
+	// Initialize map coordinator
+	mapCoordinator, err := policy.NewMapCoordinator(auditLogger)
+	if err != nil {
+		log.Printf("[polling] Warning: failed to initialize map coordinator: %v", err)
+		mapCoordinator = nil // Continue without advanced maps
+	}
 
 	return &PollingClient{
 		hostID:       hostID,
@@ -135,9 +143,10 @@ func NewPollingClient(hostID, registryURL, actionsURL, natsURL string, telemetry
 		publicKey:    publicKey,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		validator:    policy.NewPolicyValidator(),
-		rollbackMgr:  rollbackMgr,
-		historyMgr:   historyMgr,
-		auditLogger:  auditLogger,
+		rollbackMgr:    rollbackMgr,
+		historyMgr:     historyMgr,
+		auditLogger:    auditLogger,
+		mapCoordinator: mapCoordinator,
 	}
 }
 
@@ -644,6 +653,17 @@ func (pc *PollingClient) applyPolicyToEBPFMaps(policy PolicyRule, config ConfigR
 		"protocol":  policy.Protocol,
 	})
 	
+	// Try to apply as complex policy if map coordinator is available
+	if pc.mapCoordinator != nil {
+		complexPolicy := pc.convertToComplexPolicy(policy)
+		if err := pc.mapCoordinator.ApplyComplexPolicy(complexPolicy); err != nil {
+			log.Printf("[polling] Warning: failed to apply complex policy: %v", err)
+			// Continue with basic policy application
+		} else {
+			log.Printf("[polling] Successfully applied complex policy: %s", policy.Name)
+		}
+	}
+	
 	log.Printf("[polling] Successfully updated eBPF map with rule: %s -> %s (native library)", policy.TargetIP, policy.Action)
 	return nil
 }
@@ -766,4 +786,69 @@ func (pc *PollingClient) getCurrentMapState() map[string]interface{} {
 	
 	log.Printf("[polling] Captured current map state for rollback")
 	return mapState
+}
+
+// convertToComplexPolicy converts a simple policy rule to a complex policy
+func (pc *PollingClient) convertToComplexPolicy(rule PolicyRule) *policy.Policy {
+	// Create a complex policy from the simple rule
+	complexPolicy := &policy.Policy{
+		ID:          rule.Name,
+		Name:        rule.Name,
+		Description: rule.Description,
+		Type:        "network",
+		Priority:    100, // Default priority
+		Enabled:     true,
+		Rules:       []policy.Rule{},
+		Metadata:    map[string]interface{}{},
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	
+	// Create a rule from the policy rule
+	ruleObj := policy.Rule{
+		ID:       rule.Name + "_rule",
+		Action:   rule.Action,
+		Priority: 100,
+		Conditions: []policy.Condition{},
+		Metadata: map[string]interface{}{},
+	}
+	
+	// Add network conditions based on the policy rule
+	if rule.TargetIP != "" {
+		ruleObj.Conditions = append(ruleObj.Conditions, policy.Condition{
+			Field:    "destination_ip",
+			Operator: "eq",
+			Value:    rule.TargetIP,
+		})
+	}
+	
+	if rule.Protocol != "" {
+		ruleObj.Conditions = append(ruleObj.Conditions, policy.Condition{
+			Field:    "protocol",
+			Operator: "eq",
+			Value:    rule.Protocol,
+		})
+	}
+	
+	// Add direction condition
+	if rule.Direction != "" {
+		ruleObj.Conditions = append(ruleObj.Conditions, policy.Condition{
+			Field:    "direction",
+			Operator: "eq",
+			Value:    rule.Direction,
+		})
+	}
+	
+	complexPolicy.Rules = append(complexPolicy.Rules, ruleObj)
+	
+	// Add metadata for service dependencies if available
+	if rule.Type != "" {
+		complexPolicy.Metadata["policy_type"] = rule.Type
+	}
+	
+	if rule.Hook != "" {
+		complexPolicy.Metadata["hook"] = rule.Hook
+	}
+	
+	return complexPolicy
 }
