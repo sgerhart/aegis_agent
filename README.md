@@ -1,318 +1,210 @@
-# 🛡️ AegisFlux Agent
+# Aegis Agent - Enterprise Security Platform
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![eBPF](https://img.shields.io/badge/eBPF-Cilium-blue?style=flat&logo=linux)](https://cilium.io/)
-
-A **An Exploratory eBPF agent** for the AegisFlux platform that runs on Linux hosts to manage and execute eBPF programs with enterprise-grade security, monitoring, and reliability features.
-
-## 📋 Table of Contents
-
-- [Overview](#-overview)
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Quick Start](#-quick-start)
-- [Deployment](#-deployment)
-- [Configuration](#-configuration)
-- [Development](#-development)
-- [API Reference](#-api-reference)
-- [Contributing](#-contributing)
-- [License](#-license)
-
-## 🎯 Overview
-
-AegisFlux Agent is a lightweight, secure host-side agent that:
-
-- **Fetches** eBPF artifacts from a registry service
-- **Verifies** digital signatures using Vault or development keys
-- **Loads** CO-RE eBPF programs into the kernel (XDP, TC, LSM, kprobes)
-- **Monitors** runtime performance with automatic rollback
-- **Reports** telemetry and system capabilities via NATS
-- **Provides** health and status APIs for operators
-
-### Key Capabilities
-
-- 🔒 **Security First**: Signature verification, capability restrictions, secure defaults
-- ⚡ **High Performance**: Kernel-level eBPF execution with minimal overhead
-- 🧠 **Autonomous**: TTL management, drift detection, automatic rollback
-- 📡 **Observable**: Comprehensive telemetry and health monitoring
-- 🐧 **Linux Native**: Works on bare metal, VMs, and Kubernetes nodes
-- 🧩 **Modular**: Clean architecture with pluggable components
-
-## ✨ Features
-
-### Core Functionality
-- **eBPF Program Loading**: CO-RE support with Cilium eBPF library
-- **Signature Verification**: Vault integration + development key support
-- **Registry Integration**: Artifact fetching and bundle download
-- **Telemetry**: Real-time metrics and event reporting via NATS
-
-### Security & Reliability
-- **CPU Guard**: Automatic rollback on resource threshold breaches
-- **Drift Detection**: File integrity monitoring and TTL management
-- **Capability Probing**: System capability detection and reporting
-- **Error Handling**: Comprehensive error recovery and logging
-
-### Operations
-- **Health Monitoring**: `/healthz` and `/status` endpoints
-- **Systemd Integration**: Production-ready service management
-- **Container Support**: Docker and Docker Compose deployment
-- **Configuration**: Environment-based configuration management
+A comprehensive, modular security agent with advanced network segmentation, process monitoring, and threat intelligence capabilities.
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Registry      │    │   AegisFlux     │    │      NATS       │
-│   Service       │◄───┤     Agent       ├───►│   Telemetry     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │   Linux Kernel  │
-                       │   eBPF Programs │
-                       └─────────────────┘
-```
-
-### Component Structure
-
-```
-agents/local-agent-go/
-├── cmd/agent/                 # Main application entrypoint
-├── internal/
-│   ├── capability/           # System capability detection
-│   ├── drift/                # File drift detection
-│   ├── guard/                # CPU monitoring and rollback
-│   ├── loader/               # eBPF program loading
-│   ├── registry/             # Registry client
-│   ├── status/               # Health and status API
-│   ├── telemetry/            # NATS telemetry
-│   └── verify/               # Signature verification
-├── deploy/
-│   └── systemd/              # Systemd service unit
-├── Dockerfile                # Container build
-├── docker-compose.yml        # Full stack deployment
-└── DEPLOYMENT.md             # Deployment documentation
+aegis-agent/
+├── agents/aegis/           # Core agent implementation
+├── backend/                # Backend API services
+├── bpf/                    # eBPF programs and maps
+├── docs/                   # Documentation
+├── examples/               # Configuration examples
+├── scripts/                # Deployment and utility scripts
+└── artifacts/              # Build artifacts and binaries
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-
-- **Linux kernel 4.15+** with eBPF support
-- **Go 1.23+** (for building from source)
-- **Root privileges** or appropriate capabilities (`CAP_BPF`, `CAP_NET_ADMIN`)
-- **Registry service** and **NATS broker** access
+- Go 1.21+
+- Linux kernel 5.4+ (for eBPF)
+- Root privileges (for eBPF operations)
 
 ### Build and Run
-
 ```bash
-# Clone the repository
-git clone https://github.com/sgerhart/aegis_agent.git
-cd aegis_agent/agents/local-agent-go
-
 # Build the agent
-go mod tidy
-go build -o aegisflux-agent ./cmd/agent
+cd agents/aegis
+go build -o aegis-agent ./cmd/aegis/main.go
 
 # Run with basic configuration
-sudo ./aegisflux-agent
+sudo ./aegis-agent --config=examples/configs/basic.yaml
 ```
 
-### Verify Installation
+## 📚 Documentation
 
-```bash
-# Check health
-curl -s http://localhost:7070/healthz
-# {"ok":true}
+### Core Documentation
+- [**Implementation Plan**](docs/plans/COMPREHENSIVE_AGENT_MODULARIZATION_PLAN.md) - Complete modularization and communication plan
+- [**Agent Evolution**](docs/plans/AGENT_EVOLUTION_IMPLEMENTATION_PLAN.md) - 4-phase evolution roadmap
+- [**Size Analysis**](docs/analysis/AGENT_SIZE_ANALYSIS.md) - Size optimization analysis
 
-# Check status
-curl -s http://localhost:7070/status | jq .
-# {
-#   "loaded": {},
-#   "capabilities": {...}
-# }
+### Guides
+- [**Artifact Processing**](docs/guides/AGENT_ARTIFACT_PROCESSING_GUIDE.md) - Backend artifact processing
+- [**Backend Interface**](docs/guides/AGENT_TEAM_BACKEND_CLARIFICATION.md) - Backend interface selection
+- [**Enhanced Interaction**](docs/guides/ENHANCED_AGENT_BACKEND_INTERACTION.md) - Agent-backend interaction
+
+### Communication
+- [**Secure Communication**](docs/communication/SECURE_AGENT_BACKEND_COMMUNICATION.md) - Bidirectional WebSocket communication
+
+### Deployment
+- [**ARM64 Deployment**](docs/deployment/README_ARM64_DEPLOYMENT.md) - ARM64 deployment guide
+- [**Agent Cap5B**](docs/deployment/README_AGENT_CAP5B.md) - Capability 5B implementation
+- [**Next Steps**](docs/deployment/README_NEXT_STEPS.md) - Implementation next steps
+
+## 🔧 Features
+
+### Core Security
+- **Network Segmentation**: eBPF-based network policy enforcement
+- **Process Monitoring**: Real-time process tracking and analysis
+- **Policy Validation**: Comprehensive policy validation and conflict detection
+- **Rollback Mechanisms**: Intelligent rollback planning and execution
+
+### Advanced Capabilities
+- **Dependency Analysis**: System dependency mapping and analysis
+- **Threat Intelligence**: Real-time threat intelligence integration
+- **Anomaly Detection**: Behavioral anomaly detection and alerting
+- **Policy Simulation**: Policy impact simulation and testing
+
+### Communication
+- **Secure WebSocket**: Encrypted bidirectional communication
+- **Firewall Friendly**: Agent-initiated connections
+- **Real-time Events**: Live event streaming and command processing
+- **Channel-based Routing**: Organized communication channels
+
+## 📦 Modular Architecture
+
+The agent supports modular deployment based on requirements:
+
+### Core Agent (5,000 lines)
+- Essential security functions
+- Basic policy engine
+- eBPF management
+- Secure communication
+
+### Optional Modules
+- **Analysis Module**: Dependency analysis, policy simulation
+- **Observability Module**: Process monitoring, anomaly detection
+- **Threat Intelligence Module**: Threat intel integration
+- **Advanced Policies Module**: Process-level policies
+
+## 🚀 Deployment Scenarios
+
+### Minimal Agent
+```yaml
+core:
+  enabled: true
+modules:
+  analysis: {enabled: false}
+  observability: {enabled: false}
+  threat_intelligence: {enabled: false}
+  advanced_policies: {enabled: false}
 ```
 
-## 🚀 Deployment
-
-### Systemd (Recommended)
-
-```bash
-# Copy service file
-sudo cp deploy/systemd/aegisflux-agent.service /etc/systemd/system/
-
-# Configure environment
-sudo systemctl edit aegisflux-agent
-# Add your configuration:
-# [Service]
-# Environment=AGENT_REGISTRY_URL=http://your-registry:8090
-# Environment=NATS_URL=nats://your-nats:4222
-# Environment=AGENT_HOST_ID=your-host-id
-
-# Enable and start
-sudo systemctl daemon-reload
-sudo systemctl enable --now aegisflux-agent
+### Standard Agent
+```yaml
+core:
+  enabled: true
+modules:
+  observability: {enabled: true}
+  # Other modules disabled
 ```
 
-### Docker
-
-```bash
-# Build image
-docker build -t aegisflux-agent .
-
-# Run container
-docker run -d \
-  --name aegisflux-agent \
-  --privileged \
-  --cap-add=BPF \
-  --cap-add=NET_ADMIN \
-  -p 7070:7070 \
-  -e AGENT_REGISTRY_URL=http://your-registry:8090 \
-  -e NATS_URL=nats://your-nats:4222 \
-  aegisflux-agent
+### Full Agent
+```yaml
+core:
+  enabled: true
+modules:
+  analysis: {enabled: true}
+  observability: {enabled: true}
+  threat_intelligence: {enabled: true}
+  advanced_policies: {enabled: true}
 ```
 
-### Docker Compose
+## 🔐 Security Features
 
-```bash
-# Start full stack
-docker-compose up -d
+- **End-to-End Encryption**: ChaCha20-Poly1305 encryption
+- **Digital Signatures**: Ed25519 message integrity
+- **Mutual Authentication**: Agent and backend verification
+- **Perfect Forward Secrecy**: Key rotation for security
+- **Audit Logging**: Comprehensive security event logging
 
-# View logs
-docker-compose logs -f aegisflux-agent
-```
+## 📊 Performance
 
-## ⚙️ Configuration
+- **Startup Time**: < 2 seconds
+- **Memory Usage**: < 50 MB (core), < 100 MB (full)
+- **Binary Size**: < 10 MB (optimized build)
+- **Communication Latency**: < 100ms
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENT_REGISTRY_URL` | `http://localhost:8090` | Registry service URL |
-| `NATS_URL` | `nats://localhost:4222` | NATS broker URL |
-| `AGENT_HTTP_ADDR` | `:7070` | HTTP server address |
-| `AGENT_POLL_INTERVAL` | `10s` | Registry polling interval |
-| `AGENT_BUNDLES_DIR` | `./bundles` | Bundle storage directory |
-| `AGENT_HOST_ID` | `host-unknown` | Unique host identifier |
-| `VAULT_URL` | `` | Vault server URL (optional) |
-| `VAULT_TOKEN` | `` | Vault authentication token |
-| `DEV_PUBLIC_KEY_PATH` | `` | Development public key path |
-
-### Example Configuration
-
-```bash
-export AGENT_REGISTRY_URL="https://registry.company.com"
-export NATS_URL="nats://nats.company.com:4222"
-export AGENT_HOST_ID="web-server-01"
-export VAULT_URL="https://vault.company.com"
-export VAULT_TOKEN="$(vault token -format=raw)"
-```
-
-## 🧪 Development
+## 🛠️ Development
 
 ### Project Structure
+```
+agents/aegis/
+├── cmd/aegis/              # Main entry points
+├── internal/
+│   ├── core/               # Core agent logic
+│   ├── communication/      # Backend communication
+│   ├── enforcement/        # Policy enforcement
+│   ├── observability/      # Process monitoring
+│   ├── analysis/           # Dependency analysis
+│   ├── policy/             # Policy management
+│   └── telemetry/          # Event logging
+└── pkg/models/             # Data models
+```
 
-The agent is built with a modular architecture:
-
-- **`cmd/agent/`**: Main application and orchestration
-- **`internal/`**: Internal packages for specific functionality
-- **`deploy/`**: Deployment configurations
-- **`prompts/`**: Development specifications and requirements
-
-### Development Workflow
-
-1. **Use the provided prompts** in `prompts/agents/local-agent-go/` for guided development
-2. **Test locally** with a privileged Docker container
-3. **Monitor telemetry** with `nats sub agent.telemetry`
-4. **Run tests** with the included end-to-end smoke tests
-
-### Building from Source
-
+### Building
 ```bash
-# Install dependencies
-go mod download
+# Core agent only
+go build -tags="core" -o aegis-agent-core
 
-# Run tests
-go test ./...
+# With observability
+go build -tags="core,observability" -o aegis-agent-obs
 
-# Build for different architectures
-GOOS=linux GOARCH=amd64 go build -o aegisflux-agent-amd64 ./cmd/agent
-GOOS=linux GOARCH=arm64 go build -o aegisflux-agent-arm64 ./cmd/agent
+# Full agent
+go build -tags="all" -o aegis-agent-full
 ```
 
-## 📊 API Reference
+## 📈 Roadmap
 
-### Health Endpoints
+### Phase 1: Core Agent Extraction ✅
+- Extract essential components
+- Remove redundant code
+- Basic build optimization
 
-#### `GET /healthz`
-Basic health check endpoint.
+### Phase 2: Modular Architecture 🚧
+- Create plugin system
+- Extract optional modules
+- Dynamic loading capability
 
-**Response:**
-```json
-{"ok": true}
-```
+### Phase 3: Secure Communication 🚧
+- WebSocket implementation
+- Encryption and authentication
+- Channel-based routing
 
-#### `GET /status`
-Detailed status including loaded artifacts and system capabilities.
-
-**Response:**
-```json
-{
-  "loaded": {
-    "artifact-123": "2025-09-17T14:32:11Z"
-  },
-  "capabilities": {
-    "kernel_version": "5.4.0",
-    "btf_available": true,
-    "bpf_features": {...}
-  }
-}
-```
-
-### Telemetry Events
-
-Events are published to the `agent.telemetry` NATS subject:
-
-```json
-{
-  "host_id": "web-01",
-  "artifact_id": "ebpf-2025-0007",
-  "status": "loaded",
-  "drops": 0,
-  "errors": 0,
-  "cpu_pct": 0.1,
-  "verifier_msg": null,
-  "ts": "2025-09-17T14:32:11Z"
-}
-```
+### Phase 4: Integration & Optimization 📋
+- Module integration
+- Performance optimization
+- Comprehensive testing
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Development Guide](DEPLOYMENT.md) for details on:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
 
-- Setting up the development environment
-- Running tests and validation
-- Submitting pull requests
-- Code style and conventions
+## 📄 License
 
-### Development Prompts
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-The project includes structured development prompts in `prompts/agents/local-agent-go/`:
+## 🆘 Support
 
-1. **Scaffold Review** - Basic agent structure
-2. **Registry Client** - Artifact fetching and download
-3. **Signature Verification** - Vault and dev key support
-4. **eBPF Loading** - Cilium eBPF integration
-5. **Telemetry Events** - NATS event publishing
-6. **Capability Probe** - System capability detection
-7. **CPU Guard** - Resource monitoring and rollback
-8. **Drift Detection** - File integrity monitoring
-9. **Systemd & Container** - Deployment configurations
-10. **E2E Testing** - End-to-end validation
+- **Documentation**: See `docs/` directory
+- **Issues**: GitHub Issues
+- **Discussions**: GitHub Discussions
 
-## 📜 License
+---
 
-MIT © 2025 Dentro.io / AegisFlux Contributors
-
-See [LICENSE](LICENSE) for details.
+**Aegis Agent** - Enterprise-grade security for modern infrastructure.

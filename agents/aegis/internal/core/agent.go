@@ -23,7 +23,7 @@ type Agent struct {
 	telemetry    *telemetry.Logger
 	
 	// Communication
-	commManager  *communication.SecureConnectionManager
+	commManager  *communication.WebSocketManager
 	
 	// Module system
 	moduleManager *modules.ModuleManagerImpl
@@ -105,7 +105,7 @@ func (a *Agent) initializeComponents() error {
 	
 	// Initialize communication manager
 	if a.config.BackendURL != "" {
-		commManager, err := communication.NewSecureConnectionManager(a.agentID, a.config.BackendURL)
+		commManager, err := communication.NewWebSocketManager(a.agentID, a.config.BackendURL)
 		if err != nil {
 			log.Printf("[core] Warning: failed to initialize communication manager: %v", err)
 			// Continue without communication - agent can run standalone
@@ -136,9 +136,17 @@ func (a *Agent) registerBuiltInModules() error {
 		return fmt.Errorf("failed to register telemetry module factory: %w", err)
 	}
 	
-	// Register communication module
+	// Register WebSocket communication module
+	websocketCommFactory := func(config modules.ModuleConfig) (modules.ModuleInterface, error) {
+		return modules.NewWebSocketCommunicationModule(a.telemetry), nil
+	}
+	if err := a.moduleFactory.RegisterFactory("websocket_communication", websocketCommFactory); err != nil {
+		return fmt.Errorf("failed to register WebSocket communication module factory: %w", err)
+	}
+	
+	// Register legacy communication module for backward compatibility
 	communicationFactory := func(config modules.ModuleConfig) (modules.ModuleInterface, error) {
-		return modules.NewCommunicationModule(a.telemetry), nil
+		return modules.NewWebSocketCommunicationModule(a.telemetry), nil
 	}
 	if err := a.moduleFactory.RegisterFactory("communication", communicationFactory); err != nil {
 		return fmt.Errorf("failed to register communication module factory: %w", err)
@@ -231,7 +239,7 @@ func (a *Agent) startEnabledModules() error {
 	// Create default modules if none specified
 	enabledModules := a.config.EnabledModules
 	if len(enabledModules) == 0 {
-		enabledModules = []string{"telemetry", "communication", "observability"}
+		enabledModules = []string{"telemetry", "websocket_communication", "observability"}
 	}
 	
 	for _, moduleType := range enabledModules {
@@ -395,7 +403,7 @@ func (a *Agent) sendStatusUpdate() error {
 	}
 	
 	if a.commManager != nil {
-		return a.commManager.SendMessage("agent.status", "event", status)
+		return a.commManager.SendMessage("agent.status", communication.MessageTypeEvent, status)
 	}
 	
 	return nil

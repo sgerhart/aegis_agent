@@ -1,32 +1,41 @@
-# Binaries for programs and plugins
+# Binaries and executables
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-aegisflux-agent
-aegisflux-agent-*
+aegis-agent
+aegis-agent-*
+*.bin
 
-# Test binary, built with `go test -c`
+# Build artifacts
+/build/
+/dist/
+/artifacts/binaries/
+/artifacts/logs/
+
+# Go specific
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
+*.prof
 *.out
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
+vendor/
 go.work
+go.work.sum
 
-# IDE files
+# eBPF specific
+*.o
+*.ll
+vmlinux.h
+bpf/vmlinux.h
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS generated files
+# OS specific
 .DS_Store
 .DS_Store?
 ._*
@@ -37,44 +46,157 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+*.log.*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+/temp/
 
-# Coverage directory used by tools like istanbul
-coverage/
+# Configuration files with secrets
+*.secret
+*.key
+*.pem
+*.crt
+*.p12
+config/secrets/
+secrets/
 
-# nyc test coverage
-.nyc_output
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Coverage reports
+coverage.out
+coverage.html
+*.cover
 
 # Dependency directories
 node_modules/
+vendor/
 
-# Optional npm cache directory
-.npm
+# Test artifacts
+test-results/
+coverage/
 
-# Optional REPL history
-.node_repl_history
+# Documentation build
+docs/_build/
+docs/build/
 
-# Output of 'npm pack'
-*.tgz
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Yarn Integrity file
-.yarn-integrity
+# Docker
+.dockerignore
+docker-compose.override.yml
 
-# dotenv environment variables file
-.env
+# Kubernetes
+*.kubeconfig
 
-# Bundle directories
-bundles/
-test-bundles/
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
 
-# Mock files
-mock-registry.json
+# Ansible
+*.retry
 
-# Temporary files
-tmp/
-temp/
+# Vagrant
+.vagrant/
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# MacOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Project specific
+/artifacts/
+/logs/
+/tmp/
+/temp/
+*.secret
+*.key
+config/secrets/
+secrets/
