@@ -1,0 +1,57 @@
+aegis-agent/
+  internal/
+    crypto/
+      verifier.go              # Ed25519/JWS verify (detached sig support)
+      truststore.go            # CA bundle + backend signer pubkey mgmt
+    rollout/
+      dryrun.go                # verify-only path, no map mutations
+      ttl.go                   # TTL/expiry checks for assignments
+      rollback.go              # safe revert of map snapshots
+    telemetry/
+      events.go                # structured events (JSON) for NATS/http
+    ebpf/
+      loader.go                # integrate verify→apply→telemetry
+    registry/
+      client.go                # add mTLS; bundle+sig fetch; etag/version
+  pkg/
+    models/
+      assignment.go            # add TTL, selectors, dry_run fields
+      bundle.go                # id, hash, sig, algo, created_at
+  cmd/aegis/
+    main.go                    # wires safety shim flags + telemetry toggles
+  configs/
+    mtls/
+      agent.key PEM
+      agent.crt PEM
+      ca.crt    PEM
+    policy/
+      truststore.json          # backend signer pubkey(s)
+  systemd/
+    aegis.service              # add envs for mTLS + truststore paths
+  prompts/
+    agent_07_9_safety_shim.md  # Cursor task list (see below)
+  docs/
+    AGENT_SAFETY_SHIM.md       # what/why/how + ops runbook
+
+
+prompts/agent_07_9_safety_shim.md
+
+Implement detached Ed25519 verification in internal/crypto/verifier.go
+
+Add trust store (truststore.json) supporting key rotation (kid, algo, base64 pubkey)
+
+Wire verify → dry-run → apply → telemetry in ebpf/loader.go
+
+Enforce TTL + host selectors in pkg/models/assignment.go
+
+Implement rollback trigger on loader/verifier failure (internal/rollout/rollback.go)
+
+Switch registry/client.go to mTLS using configs/mtls/agent.crt|key and ca.crt
+
+Emit structured telemetry (internal/telemetry/events.go) on:
+
+verify_ok/failed, enforce_ok/failed, rollback_ok/failed, counters
+
+Add flags/env:
+
+Aegis_DryRun=true|false, Aegis_Mtls=true|false, Aegis_TrustStore=/path/...

@@ -1,109 +1,62 @@
 package telemetry
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 )
 
-// EventType represents the type of telemetry event
+// Event represents a telemetry event
+type Event struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Message   string                 `json:"message"`
+	Timestamp int64                  `json:"timestamp"`
+	Level     string                 `json:"level"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// EventType represents the type of event
 type EventType string
 
 const (
-	EventTypePolicyChange  EventType = "policy_change"
-	EventTypeMapUpdate     EventType = "map_update"
-	EventTypeSecurityEvent EventType = "security_event"
+	EventTypePolicyApplied    EventType = "policy_applied"
+	EventTypePolicyRemoved    EventType = "policy_removed"
+	EventTypePolicyFailed     EventType = "policy_failed"
+	EventTypeEnforcementStart EventType = "enforcement_start"
+	EventTypeEnforcementStop  EventType = "enforcement_stop"
+	EventTypeError           EventType = "error"
+	EventTypeInfo            EventType = "info"
+	EventTypeWarning         EventType = "warning"
 )
 
-// EventSeverity represents the severity of an event
-type EventSeverity string
-
-const (
-	SeverityInfo     EventSeverity = "info"
-	SeverityWarning  EventSeverity = "warning"
-	SeverityError    EventSeverity = "error"
-	SeverityCritical EventSeverity = "critical"
-)
-
-// TelemetryEvent represents a structured telemetry event
-type TelemetryEvent struct {
-	ID          string                 `json:"id"`
-	Type        EventType              `json:"type"`
-	Severity    EventSeverity          `json:"severity"`
-	Timestamp   time.Time              `json:"timestamp"`
-	HostID      string                 `json:"host_id"`
-	AgentUID    string                 `json:"agent_uid"`
-	Event       string                 `json:"event"`
-	Description string                 `json:"description"`
-	Source      string                 `json:"source"`
-	User        string                 `json:"user"`
-	PolicyID    string                 `json:"policy_id,omitempty"`
-	PolicyName  string                 `json:"policy_name,omitempty"`
-	Details     map[string]interface{} `json:"details"`
-	Tags        []string               `json:"tags,omitempty"`
-}
-
-// EventEmitter interface for emitting telemetry events
-type EventEmitter interface {
-	EmitCustomEvent(eventType EventType, severity EventSeverity, event string, details map[string]interface{})
-}
-
-// ConsoleEventEmitter emits events to console/log
-type ConsoleEventEmitter struct {
-	hostID   string
-	agentUID string
-}
-
-// NewConsoleEventEmitter creates a new console event emitter
-func NewConsoleEventEmitter(hostID, agentUID string) *ConsoleEventEmitter {
-	return &ConsoleEventEmitter{
-		hostID:   hostID,
-		agentUID: agentUID,
-	}
-}
-
-// EmitCustomEvent emits a custom telemetry event
-func (cee *ConsoleEventEmitter) EmitCustomEvent(eventType EventType, severity EventSeverity, event string, details map[string]interface{}) {
-	telemetryEvent := TelemetryEvent{
-		ID:          generateEventID(),
-		Type:        eventType,
-		Severity:    severity,
-		Timestamp:   time.Now(),
-		HostID:      cee.hostID,
-		AgentUID:    cee.agentUID,
-		Event:       event,
-		Description: event,
-		Source:      "custom",
-		User:        "system",
-		Details:     details,
-		Tags:        []string{"custom", string(eventType)},
-	}
-	
-	cee.logEvent(telemetryEvent)
-}
-
-// logEvent logs a telemetry event
-func (cee *ConsoleEventEmitter) logEvent(event TelemetryEvent) {
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		log.Printf("[TELEMETRY] Failed to marshal event: %v", err)
-		return
-	}
-	
-	switch event.Severity {
-	case SeverityCritical:
-		log.Printf("[TELEMETRY-CRITICAL] %s", string(eventJSON))
-	case SeverityError:
-		log.Printf("[TELEMETRY-ERROR] %s", string(eventJSON))
-	case SeverityWarning:
-		log.Printf("[TELEMETRY-WARN] %s", string(eventJSON))
-	default:
-		log.Printf("[TELEMETRY-INFO] %s", string(eventJSON))
+// NewEvent creates a new telemetry event
+func NewEvent(eventType EventType, message string, metadata map[string]interface{}) *Event {
+	return &Event{
+		ID:        generateEventID(),
+		Type:      string(eventType),
+		Message:   message,
+		Timestamp: time.Now().Unix(),
+		Level:     getEventLevel(eventType),
+		Metadata:  metadata,
 	}
 }
 
 // generateEventID generates a unique event ID
 func generateEventID() string {
-	return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	// Simple ID generation - in production, use proper UUID
+	return fmt.Sprintf("event_%d", time.Now().UnixNano())
+}
+
+// getEventLevel returns the log level for an event type
+func getEventLevel(eventType EventType) string {
+	switch eventType {
+	case EventTypeError, EventTypePolicyFailed:
+		return "error"
+	case EventTypeWarning:
+		return "warn"
+	case EventTypeInfo, EventTypePolicyApplied, EventTypePolicyRemoved, EventTypeEnforcementStart, EventTypeEnforcementStop:
+		return "info"
+	default:
+		return "info"
+	}
 }

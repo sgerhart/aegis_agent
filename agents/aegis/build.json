@@ -1,0 +1,122 @@
+{
+  "builds": [
+    {
+      "name": "core",
+      "description": "Core agent with essential security functions",
+      "source": "./cmd/aegis/main_core.go",
+      "output": "aegis-agent-core",
+      "flags": {
+        "ldflags": "-s -w -X main.version=1.0.0",
+        "trimpath": true,
+        "buildmode": "pie"
+      },
+      "optimizations": {
+        "strip": true,
+        "compress": false,
+        "static": true
+      },
+      "target_size": "5MB",
+      "features": [
+        "network_segmentation",
+        "policy_management",
+        "ebpf_enforcement",
+        "basic_telemetry",
+        "secure_communication"
+      ]
+    },
+    {
+      "name": "full",
+      "description": "Full agent with all advanced features",
+      "source": "./cmd/aegis/main.go",
+      "output": "aegis-agent-full",
+      "flags": {
+        "ldflags": "-s -w -X main.version=1.0.0",
+        "trimpath": true,
+        "buildmode": "pie"
+      },
+      "optimizations": {
+        "strip": true,
+        "compress": true,
+        "static": true
+      },
+      "target_size": "15MB",
+      "features": [
+        "network_segmentation",
+        "policy_management",
+        "ebpf_enforcement",
+        "advanced_telemetry",
+        "secure_communication",
+        "process_monitoring",
+        "threat_intelligence",
+        "dependency_analysis",
+        "policy_simulation",
+        "rollback_planning"
+      ]
+    },
+    {
+      "name": "minimal",
+      "description": "Minimal agent for embedded systems",
+      "source": "./cmd/aegis/main_core.go",
+      "output": "aegis-agent-minimal",
+      "flags": {
+        "ldflags": "-s -w -X main.version=1.0.0",
+        "trimpath": true,
+        "buildmode": "pie"
+      },
+      "optimizations": {
+        "strip": true,
+        "compress": true,
+        "static": true,
+        "tinygo": false
+      },
+      "target_size": "2MB",
+      "features": [
+        "network_segmentation",
+        "basic_policy_management",
+        "ebpf_enforcement"
+      ]
+    }
+  ],
+  "optimization_levels": {
+    "development": {
+      "debug": true,
+      "strip": false,
+      "compress": false,
+      "static": false
+    },
+    "staging": {
+      "debug": false,
+      "strip": true,
+      "compress": false,
+      "static": true
+    },
+    "production": {
+      "debug": false,
+      "strip": true,
+      "compress": true,
+      "static": true
+    }
+  },
+  "targets": {
+    "linux_amd64": {
+      "os": "linux",
+      "arch": "amd64",
+      "cgo": false
+    },
+    "linux_arm64": {
+      "os": "linux",
+      "arch": "arm64",
+      "cgo": false
+    },
+    "darwin_amd64": {
+      "os": "darwin",
+      "arch": "amd64",
+      "cgo": false
+    },
+    "darwin_arm64": {
+      "os": "darwin",
+      "arch": "arm64",
+      "cgo": false
+    }
+  }
+}
