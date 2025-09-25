@@ -37,7 +37,9 @@ type WebSocketManager struct {
 	messageRouter     *MessageRouter
 	healthChecker     *HealthChecker
 	metrics           *ConnectionMetrics
+	reconnectChan     chan struct{}
 	mu                sync.RWMutex
+	writeMu           sync.Mutex // Mutex for WebSocket writes to prevent concurrent writes
 	ctx               context.Context
 	cancel            context.CancelFunc
 	running           bool
@@ -134,11 +136,12 @@ func NewWebSocketManager(agentID, backendURL string) (*WebSocketManager, error) 
 			responseChans: make(map[string]chan interface{}),
 		},
 		healthChecker: &HealthChecker{
-			heartbeatTimeout: 30 * time.Second,
+			heartbeatTimeout: 15 * time.Second,
 		},
-		metrics: &ConnectionMetrics{},
-		ctx:     ctx,
-		cancel:  cancel,
+		metrics:       &ConnectionMetrics{},
+		reconnectChan: make(chan struct{}, 1),
+		ctx:           ctx,
+		cancel:        cancel,
 	}, nil
 }
 
@@ -161,6 +164,7 @@ func (wsm *WebSocketManager) Start() error {
 	go wsm.heartbeat()
 	go wsm.connectionMonitor()
 	go wsm.queueProcessor()
+	go wsm.reconnectionHandler()
 
 	wsm.running = true
 	log.Printf("[websocket] WebSocket manager started for agent %s", wsm.agentID)
@@ -197,28 +201,35 @@ func (wsm *WebSocketManager) SendMessage(channel string, messageType MessageType
 		return fmt.Errorf("not connected to backend")
 	}
 
-	// Encrypt payload
-	encryptedPayload, nonce, err := wsm.encryptPayload(payload)
+	// Serialize payload to JSON and base64 encode (matching backend expectations)
+	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt payload: %w", err)
+		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
+	payloadB64 := base64.StdEncoding.EncodeToString(payloadJSON)
 
 	// Create secure message
 	msg := SecureMessage{
 		ID:        wsm.generateMessageID(),
 		Type:      messageType,
 		Channel:   channel,
-		Payload:   encryptedPayload,
+		Payload:   payloadB64, // Base64 encoded JSON payload
 		Timestamp: time.Now().Unix(),
-		Nonce:     nonce,
+		Nonce:     base64.StdEncoding.EncodeToString([]byte("message_nonce")), // Consistent nonce for messages
+		Signature: "", // Will be set after creating the message
 		Headers:   make(map[string]string),
 	}
 
-	// Sign message
+	// Sign all messages with Ed25519 (backend expects all messages to be signed)
 	msg.Signature = wsm.signMessage(msg)
+	log.Printf("[websocket] Message type: %s, channel: %s, signed with signature: %s", messageType, channel, msg.Signature)
 
-	// Send message
-	if err := conn.WriteJSON(msg); err != nil {
+	// Send message with write mutex to prevent concurrent writes
+	wsm.writeMu.Lock()
+	err = conn.WriteJSON(msg)
+	wsm.writeMu.Unlock()
+	
+	if err != nil {
 		wsm.incrementErrorCount()
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -292,36 +303,75 @@ func (wsm *WebSocketManager) connect() error {
 	}
 
 	wsm.connection = conn
+	
+	// Initialize heartbeat time
+	wsm.healthChecker.mu.Lock()
+	wsm.healthChecker.lastHeartbeat = time.Now()
+	wsm.healthChecker.mu.Unlock()
+	
 	log.Printf("[websocket] Connected to backend at %s", wsm.backendURL)
 	return nil
 }
 
-// authenticate performs mutual authentication
+// authenticate performs mutual authentication using SecureMessage format
 func (wsm *WebSocketManager) authenticate(conn *websocket.Conn) error {
-	// Create authentication request
-	nonce := wsm.generateNonce()
+	// Create authentication request (matching Python example)
 	timestamp := time.Now().Unix()
-
+	nonce := wsm.generateNonce()
+	publicKeyB64 := base64.StdEncoding.EncodeToString(wsm.publicKey)
+	
+	// CRITICAL: Backend expects this exact signature data format
+	signatureData := fmt.Sprintf("%s:%s:%d:%s", wsm.agentID, publicKeyB64, timestamp, nonce)
+	signature := wsm.signData(signatureData)
+	
 	authReq := AuthenticationRequest{
 		AgentID:   wsm.agentID,
-		PublicKey: base64.StdEncoding.EncodeToString(wsm.publicKey),
+		PublicKey: publicKeyB64,
 		Timestamp: timestamp,
 		Nonce:     nonce,
+		Signature: signature,
 	}
 
-	// Sign the request
-	signature := wsm.signRequest(authReq)
-	authReq.Signature = signature
+	// Serialize auth request and base64 encode it
+	authReqJSON, err := json.Marshal(authReq)
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth request: %w", err)
+	}
+	authReqB64 := base64.StdEncoding.EncodeToString(authReqJSON)
 
-	// Send authentication request
-	if err := conn.WriteJSON(authReq); err != nil {
-		return fmt.Errorf("failed to send auth request: %w", err)
+	// Create SecureMessage wrapper (backend requirement)
+	secureMessage := SecureMessage{
+		ID:        fmt.Sprintf("auth_req_%d", timestamp),
+		Type:      MessageTypeRequest,
+		Channel:   "auth",
+		Payload:   authReqB64, // Base64 encoded auth request
+		Timestamp: timestamp,
+		Nonce:     base64.StdEncoding.EncodeToString([]byte("secure_nonce")),
+		Signature: "", // Can be empty for auth messages
+		Headers:   make(map[string]string),
+	}
+
+	// Send SecureMessage (not direct auth request)
+	if err := conn.WriteJSON(secureMessage); err != nil {
+		return fmt.Errorf("failed to send auth message: %w", err)
 	}
 
 	// Receive authentication response
-	var authResp AuthenticationResponse
-	if err := conn.ReadJSON(&authResp); err != nil {
+	var authRespMsg SecureMessage
+	if err := conn.ReadJSON(&authRespMsg); err != nil {
 		return fmt.Errorf("failed to read auth response: %w", err)
+	}
+
+	// Decode response payload (base64 encoded JSON)
+	responsePayloadBytes, err := base64.StdEncoding.DecodeString(authRespMsg.Payload)
+	if err != nil {
+		return fmt.Errorf("failed to decode response payload: %w", err)
+	}
+
+	// Parse response
+	var authResp AuthenticationResponse
+	if err := json.Unmarshal(responsePayloadBytes, &authResp); err != nil {
+		return fmt.Errorf("failed to parse auth response: %w", err)
 	}
 
 	// Validate response
@@ -362,10 +412,16 @@ func (wsm *WebSocketManager) messageProcessor() {
 				continue
 			}
 
+			// Set read deadline to keep connection alive
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 			var msg SecureMessage
 			if err := conn.ReadJSON(&msg); err != nil {
 				log.Printf("[websocket] Failed to read message: %v", err)
 				wsm.incrementErrorCount()
+				
+				// Trigger graceful reconnection but don't exit the loop
+				wsm.triggerGracefulReconnection()
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -412,20 +468,19 @@ func (wsm *WebSocketManager) processMessage(msg SecureMessage) error {
 
 // heartbeat sends periodic heartbeat messages
 func (wsm *WebSocketManager) heartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
+	log.Printf("[websocket] Heartbeat goroutine started")
+	
 	for {
 		select {
 		case <-wsm.ctx.Done():
+			log.Printf("[websocket] Heartbeat goroutine stopping")
 			return
 		case <-ticker.C:
-			if err := wsm.SendMessage(wsm.channels.Heartbeat, MessageTypeHeartbeat, map[string]interface{}{
-				"timestamp": time.Now().Unix(),
-				"agent_id":  wsm.agentID,
-			}); err != nil {
-				log.Printf("[websocket] Failed to send heartbeat: %v", err)
-			}
+			log.Printf("[websocket] Heartbeat ticker triggered")
+			wsm.sendHeartbeat()
 		}
 	}
 }
@@ -528,7 +583,14 @@ func (wsm *WebSocketManager) isConnectionHealthy() bool {
 	timeout := wsm.healthChecker.heartbeatTimeout
 	wsm.healthChecker.mu.RUnlock()
 
-	return time.Since(lastHeartbeat) < timeout
+	timeSince := time.Since(lastHeartbeat)
+	isHealthy := timeSince < timeout
+	
+	if !isHealthy {
+		log.Printf("[websocket] Connection unhealthy: lastHeartbeat=%v, timeSince=%v, timeout=%v", lastHeartbeat, timeSince, timeout)
+	}
+	
+	return isHealthy
 }
 
 // encryptPayload encrypts a payload using ChaCha20-Poly1305
@@ -587,12 +649,30 @@ func (wsm *WebSocketManager) decryptPayload(encryptedPayload, nonceStr string) (
 
 // signMessage signs a message using Ed25519
 func (wsm *WebSocketManager) signMessage(msg SecureMessage) string {
-	// Create data to sign
-	data := fmt.Sprintf("%s:%s:%s:%d:%s", msg.ID, msg.Type, msg.Channel, msg.Timestamp, msg.Payload)
+	// Create data to sign - match backend expectation exactly
+	// Backend expects: agent_id:public_key:timestamp:nonce
+	publicKeyB64 := base64.StdEncoding.EncodeToString(wsm.publicKey)
+	
+	// Use the exact same format as the working Python example
+	data := fmt.Sprintf("%s:%s:%d:%s", wsm.agentID, publicKeyB64, msg.Timestamp, msg.Nonce)
+	
+	log.Printf("[websocket] Signing data: %s", data)
 
 	// Sign the data
 	signature := ed25519.Sign(wsm.privateKey, []byte(data))
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+	
+	log.Printf("[websocket] Generated signature: %s", signatureB64)
 
+	return signatureB64
+}
+
+// signData signs arbitrary data with Ed25519 (for authentication)
+func (wsm *WebSocketManager) signData(data string) string {
+	// Sign the data
+	signature := ed25519.Sign(wsm.privateKey, []byte(data))
+	
+	// Return base64 encoded signature
 	return base64.StdEncoding.EncodeToString(signature)
 }
 
@@ -629,6 +709,67 @@ func (wsm *WebSocketManager) deriveSharedKey(backendKey []byte) []byte {
 	combined := append(wsm.privateKey, backendKey...)
 	hash := sha256.Sum256(combined)
 	return hash[:]
+}
+
+// deriveTempKey derives a temporary key for initial authentication
+func (wsm *WebSocketManager) deriveTempKey() []byte {
+	// Use agent's private key as temporary key for initial auth
+	hash := sha256.Sum256(wsm.privateKey)
+	return hash[:]
+}
+
+// encryptPayloadWithKey encrypts payload with a specific key
+func (wsm *WebSocketManager) encryptPayloadWithKey(payload interface{}, key []byte) (string, string, error) {
+	// Serialize payload
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Generate nonce
+	nonce := make([]byte, 12)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", "", err
+	}
+
+	// Encrypt using ChaCha20-Poly1305
+	cipher, err := chacha20poly1305.New(key)
+	if err != nil {
+		return "", "", err
+	}
+
+	encrypted := cipher.Seal(nil, nonce, data, nil)
+
+	return base64.StdEncoding.EncodeToString(encrypted),
+		   base64.StdEncoding.EncodeToString(nonce), nil
+}
+
+// decryptPayloadWithKey decrypts payload with a specific key
+func (wsm *WebSocketManager) decryptPayloadWithKey(encryptedPayload, nonceStr string, key []byte) (string, error) {
+	// Decode encrypted payload
+	encrypted, err := base64.StdEncoding.DecodeString(encryptedPayload)
+	if err != nil {
+		return "", err
+	}
+
+	// Decode nonce
+	nonce, err := base64.StdEncoding.DecodeString(nonceStr)
+	if err != nil {
+		return "", err
+	}
+
+	// Decrypt using ChaCha20-Poly1305
+	cipher, err := chacha20poly1305.New(key)
+	if err != nil {
+		return "", err
+	}
+
+	decrypted, err := cipher.Open(nil, nonce, encrypted, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return string(decrypted), nil
 }
 
 // generateMessageID generates a unique message ID
@@ -671,4 +812,92 @@ func (wsm *WebSocketManager) incrementErrorCount() {
 	wsm.metrics.mu.Lock()
 	defer wsm.metrics.mu.Unlock()
 	wsm.metrics.Errors++
+}
+
+// sendHeartbeat sends a heartbeat message to keep connection alive
+func (wsm *WebSocketManager) sendHeartbeat() {
+	wsm.mu.RLock()
+	conn := wsm.connection
+	wsm.mu.RUnlock()
+
+	if conn == nil {
+		return
+	}
+
+	// Create heartbeat message
+	heartbeatMsg := SecureMessage{
+		ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
+		Type:      MessageTypeHeartbeat,
+		Channel:   fmt.Sprintf("agent.%s.heartbeat", wsm.agentID),
+		Payload:   base64.StdEncoding.EncodeToString([]byte(`{"status":"alive","timestamp":` + fmt.Sprintf("%d", time.Now().Unix()) + `}`)),
+		Timestamp: time.Now().Unix(),
+		Nonce:     base64.StdEncoding.EncodeToString([]byte("heartbeat_nonce")),
+		Signature: "",
+		Headers:   make(map[string]string),
+	}
+
+	// Heartbeats are unsigned (as per Python example)
+	// heartbeatMsg.Signature = wsm.signMessage(heartbeatMsg)
+
+	// Send heartbeat with write mutex to prevent concurrent writes
+	wsm.writeMu.Lock()
+	err := conn.WriteJSON(heartbeatMsg)
+	wsm.writeMu.Unlock()
+	
+	if err != nil {
+		log.Printf("[websocket] Failed to send heartbeat: %v", err)
+		wsm.incrementErrorCount()
+		wsm.triggerGracefulReconnection()
+		return
+	}
+
+	// Update last heartbeat time
+	wsm.healthChecker.mu.Lock()
+	wsm.healthChecker.lastHeartbeat = time.Now()
+	wsm.healthChecker.mu.Unlock()
+
+	log.Printf("[websocket] Heartbeat sent, lastHeartbeat updated to: %v", wsm.healthChecker.lastHeartbeat)
+}
+
+// reconnectionHandler handles graceful reconnection requests
+func (wsm *WebSocketManager) reconnectionHandler() {
+	for {
+		select {
+		case <-wsm.ctx.Done():
+			return
+		case <-wsm.reconnectChan:
+			log.Printf("[websocket] Reconnection requested, attempting graceful reconnection...")
+			
+		// Wait a bit before reconnecting to avoid rapid reconnection loops
+		time.Sleep(5 * time.Second)
+			
+			// Attempt reconnection
+			if err := wsm.reconnect(); err != nil {
+				log.Printf("[websocket] Graceful reconnection failed: %v", err)
+				// Schedule another reconnection attempt
+				go func() {
+					time.Sleep(5 * time.Second)
+					select {
+					case wsm.reconnectChan <- struct{}{}:
+					default:
+					}
+				}()
+			} else {
+				log.Printf("[websocket] Graceful reconnection successful")
+			}
+		}
+	}
+}
+
+// triggerGracefulReconnection triggers a graceful reconnection attempt
+func (wsm *WebSocketManager) triggerGracefulReconnection() {
+	log.Printf("[websocket] Triggering graceful reconnection...")
+	
+	// Don't close connection immediately, let the reconnection handler deal with it
+	// Trigger reconnection
+	select {
+	case wsm.reconnectChan <- struct{}{}:
+	default:
+		// Channel is full, reconnection already in progress
+	}
 }

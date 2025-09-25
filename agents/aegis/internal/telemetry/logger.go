@@ -31,12 +31,24 @@ func NewLogger(logLevel string) *Logger {
 		logLevel: logLevel,
 	}
 	
-	// Open log file
-	file, err := os.OpenFile("/var/log/aegis-agent.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Printf("Warning: failed to open log file: %v", err)
-	} else {
-		l.file = file
+	// Try to open log file with fallback options
+	logPaths := []string{
+		"/var/log/aegis-agent.log",
+		"/tmp/aegis-agent.log",
+		"./aegis-agent.log",
+	}
+	
+	for _, logPath := range logPaths {
+		file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			l.file = file
+			log.Printf("[telemetry] Logging to file: %s", logPath)
+			break
+		}
+	}
+	
+	if l.file == nil {
+		log.Printf("Warning: failed to open any log file, logging to stdout only")
 	}
 	
 	return l

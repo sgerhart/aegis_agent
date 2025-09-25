@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers deploying the Aegis Agent on ARM64 Linux systems, including Raspberry Pi, AWS Graviton, and other ARM-based servers.
+This guide covers deploying the Aegis Agent on ARM64 Linux systems with **dynamic module control capabilities**, including Raspberry Pi, AWS Graviton, and other ARM-based servers. The agent now supports **real-time module management** from the backend without requiring restarts.
 
 ## Supported ARM64 Linux Distributions
 
@@ -57,6 +57,17 @@ sudo systemctl status aegis
 
 # View logs
 sudo journalctl -u aegis -f
+```
+
+### 4. Test Module Control
+
+```bash
+# Test module control via WebSocket
+python3 test_module_control.py
+
+# Or manually test with curl (if HTTP API available)
+curl -X POST http://localhost:7070/modules/list
+curl -X POST http://localhost:7070/modules/start -d '{"module_id": "analysis"}'
 ```
 
 ## Manual Deployment Steps
@@ -167,6 +178,30 @@ The agent includes ARM64-optimized policies:
 - **Power Efficiency**: Reduced CPU overhead for battery-powered devices
 - **Memory Optimization**: Lower memory footprint for resource-constrained systems  
 - **Low Latency**: Optimized rule evaluation for real-time applications
+
+### Dynamic Module Control
+
+The agent supports **real-time module management** from the backend:
+
+- **Available Modules**: 6 modules shipped with agent (telemetry, websocket_communication, observability, analysis, threat_intelligence, advanced_policy)
+- **Backend Control**: Start/stop modules without agent restart
+- **Resource Management**: Enable modules only when needed
+- **Zero Downtime**: Module changes don't interrupt agent operation
+
+#### Module Control Commands
+```bash
+# List all available modules
+{"type": "list_modules"}
+
+# Start a specific module
+{"type": "start_module", "module_id": "analysis"}
+
+# Stop a specific module  
+{"type": "stop_module", "module_id": "threat_intelligence"}
+
+# Get module status
+{"type": "get_module_status", "module_id": "observability"}
+```
 
 ### Architecture Detection
 

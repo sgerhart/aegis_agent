@@ -103,16 +103,8 @@ func (a *Agent) initializeComponents() error {
 	}
 	a.enforcer = enforcer
 	
-	// Initialize communication manager
-	if a.config.BackendURL != "" {
-		commManager, err := communication.NewWebSocketManager(a.agentID, a.config.BackendURL)
-		if err != nil {
-			log.Printf("[core] Warning: failed to initialize communication manager: %v", err)
-			// Continue without communication - agent can run standalone
-		} else {
-			a.commManager = commManager
-		}
-	}
+	// Communication manager will be initialized by the WebSocket communication module
+	// No need to create a separate WebSocket manager here
 	
 	// Initialize module system
 	a.moduleManager = modules.NewModuleManager(a.telemetry)
@@ -199,6 +191,15 @@ func (a *Agent) Start() error {
 	
 	log.Printf("[core] Starting agent %s", a.agentID)
 	
+	// Get communication manager from WebSocket communication module and set module manager reference
+	if websocketModule, exists := a.moduleManager.GetModule("websocket_communication"); exists && websocketModule != nil {
+		if wcm, ok := websocketModule.(*modules.WebSocketCommunicationModule); ok {
+			// Set module manager reference for backend control
+			wcm.SetModuleManager(a.moduleManager)
+			a.commManager = wcm.GetWebSocketManager()
+		}
+	}
+	
 	// Start communication manager
 	if a.commManager != nil {
 		if err := a.commManager.Start(); err != nil {
@@ -219,7 +220,13 @@ func (a *Agent) Start() error {
 	// Start telemetry
 	a.telemetry.Start()
 	
-	// Initialize and start enabled modules
+	// Initialize all available modules and start enabled ones
+	if err := a.initializeAllModules(); err != nil {
+		log.Printf("[core] Warning: failed to initialize some modules: %v", err)
+		// Continue without modules - agent can run with core functionality only
+	}
+	
+	// Start enabled modules
 	if err := a.startEnabledModules(); err != nil {
 		log.Printf("[core] Warning: failed to start some modules: %v", err)
 		// Continue without modules - agent can run with core functionality only
@@ -234,20 +241,29 @@ func (a *Agent) Start() error {
 	return nil
 }
 
-// startEnabledModules starts all enabled modules
-func (a *Agent) startEnabledModules() error {
-	// Create default modules if none specified
-	enabledModules := a.config.EnabledModules
-	if len(enabledModules) == 0 {
-		enabledModules = []string{"telemetry", "websocket_communication", "observability"}
+// initializeAllModules initializes all available modules (but doesn't start them)
+func (a *Agent) initializeAllModules() error {
+	// List of all available modules
+	allModules := []string{
+		"telemetry",
+		"websocket_communication", 
+		"observability",
+		"analysis",
+		"threat_intelligence",
+		"advanced_policy",
 	}
 	
-	for _, moduleType := range enabledModules {
-		// Create module instance
+	for _, moduleType := range allModules {
+		// Create module instance with backend URL for WebSocket communication module
+		settings := make(map[string]interface{})
+		if moduleType == "websocket_communication" {
+			settings["backend_url"] = a.config.BackendURL
+		}
+		
 		module, err := a.moduleFactory.CreateModule(moduleType, modules.ModuleConfig{
-			Enabled:  true,
+			Enabled:  false, // Start disabled by default
 			Priority: 1,
-			Settings: make(map[string]interface{}),
+			Settings: settings,
 			Environment: make(map[string]string),
 		})
 		if err != nil {
@@ -255,19 +271,59 @@ func (a *Agent) startEnabledModules() error {
 			continue
 		}
 		
-		// Register module
-		if err := a.moduleManager.RegisterModule(module); err != nil {
+		// Register module with config (disabled by default)
+		moduleConfig := modules.ModuleConfig{
+			Enabled:  false, // Will be enabled by backend or startEnabledModules
+			Priority: 1,
+			Settings: settings,
+			Environment: make(map[string]string),
+		}
+		if err := a.moduleManager.RegisterModuleWithConfig(module, moduleConfig); err != nil {
 			log.Printf("[core] Warning: failed to register module %s: %v", moduleType, err)
 			continue
 		}
 		
-		// Start module
-		if err := a.moduleManager.StartModule(module.GetInfo().ID); err != nil {
-			log.Printf("[core] Warning: failed to start module %s: %v", moduleType, err)
-			continue
+		log.Printf("[core] Module %s registered (disabled by default)", moduleType)
+	}
+	
+	return nil
+}
+
+// startEnabledModules starts all enabled modules
+func (a *Agent) startEnabledModules() error {
+	// Get enabled modules from config
+	enabledModules := a.config.EnabledModules
+	if len(enabledModules) == 0 {
+		enabledModules = []string{"telemetry", "websocket_communication", "observability"}
+	}
+	
+	for _, moduleType := range enabledModules {
+		// Check if module is already registered
+		if _, exists := a.moduleManager.GetModule(moduleType); exists {
+			// Enable the module
+			config, err := a.moduleManager.GetModuleConfig(moduleType)
+			if err != nil {
+				log.Printf("[core] Warning: failed to get config for module %s: %v", moduleType, err)
+				continue
+			}
+			
+			// Update config to enable the module
+			config.Enabled = true
+			if err := a.moduleManager.UpdateModuleConfig(moduleType, config); err != nil {
+				log.Printf("[core] Warning: failed to enable module %s: %v", moduleType, err)
+				continue
+			}
+			
+			// Start the module
+			if err := a.moduleManager.StartModule(moduleType); err != nil {
+				log.Printf("[core] Warning: failed to start module %s: %v", moduleType, err)
+				continue
+			}
+			
+			log.Printf("[core] Module %s enabled and started successfully", moduleType)
+		} else {
+			log.Printf("[core] Warning: module %s not found in registered modules", moduleType)
 		}
-		
-		log.Printf("[core] Module %s started successfully", moduleType)
 	}
 	
 	return nil

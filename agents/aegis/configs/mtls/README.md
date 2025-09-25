@@ -36,3 +36,4 @@ openssl x509 -req -days 365 -in agent.csr -CA ca.crt -CAkey ca.key -out agent.cr
 - Rotate certificates regularly
 - Use strong key sizes (4096 bits recommended)
 
+

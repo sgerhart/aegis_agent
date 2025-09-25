@@ -270,3 +270,4 @@ journalctl -u aegis-agent -f
 curl http://192.168.1.100:7070/interfaces/status
 ```
 
+

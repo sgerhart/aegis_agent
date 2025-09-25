@@ -1,0 +1,21 @@
+{
+  "agent_id": "production-agent",
+  "backend_url": "ws://192.168.1.166:8080/ws/agent",
+  "log_level": "info",
+  "modules": {
+    "enabled": [
+      "telemetry",
+      "websocket_communication"
+    ],
+    "optional": [
+      "analysis",
+      "observability",
+      "threat_intelligence",
+      "advanced_policy"
+    ]
+  },
+  "security": {
+    "key_rotation_interval": "24h",
+    "heartbeat_interval": "30s"
+  }
+}

@@ -37,6 +37,11 @@ func NewModuleManager(logger *telemetry.Logger) *ModuleManagerImpl {
 
 // RegisterModule registers a new module
 func (mm *ModuleManagerImpl) RegisterModule(module ModuleInterface) error {
+	return mm.RegisterModuleWithConfig(module, ModuleConfig{Enabled: true})
+}
+
+// RegisterModuleWithConfig registers a new module with configuration
+func (mm *ModuleManagerImpl) RegisterModuleWithConfig(module ModuleInterface, config ModuleConfig) error {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
@@ -50,6 +55,7 @@ func (mm *ModuleManagerImpl) RegisterModule(module ModuleInterface) error {
 	// Set default status
 	mm.statuses[moduleID] = ModuleStatusStopped
 	mm.modules[moduleID] = module
+	mm.configs[moduleID] = config
 
 	mm.logger.LogInfo("manager_info", fmt.Sprintf("Module registered: %s (%s)", moduleID, info.Name), nil)
 	

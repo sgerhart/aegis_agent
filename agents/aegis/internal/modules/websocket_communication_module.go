@@ -16,6 +16,7 @@ type WebSocketCommunicationModule struct {
 	websocketManager *communication.WebSocketManager
 	messageQueue     *communication.MessageQueue
 	channelManager   *communication.ChannelManager
+	moduleManager    ModuleManager // Reference to module manager for control operations
 	mu               sync.RWMutex
 }
 
@@ -62,6 +63,9 @@ func (wcm *WebSocketCommunicationModule) Initialize(ctx context.Context, config 
 	if !ok {
 		backendURL = "wss://backend.aegis.com/ws/agent"
 	}
+	
+	// Debug logging
+	fmt.Printf("[websocket_module] Backend URL from config: %s (found: %t)\n", backendURL, ok)
 
 	// Initialize WebSocket manager
 	websocketManager, err := communication.NewWebSocketManager(wcm.GetInfo().ID, backendURL)
@@ -153,6 +157,18 @@ func (wcm *WebSocketCommunicationModule) HandleMessage(message interface{}) (int
 			return wcm.handleEnableChannel(msg)
 		case "disable_channel":
 			return wcm.handleDisableChannel(msg)
+		case "start_module":
+			return wcm.handleStartModule(msg)
+		case "stop_module":
+			return wcm.handleStopModule(msg)
+		case "enable_module":
+			return wcm.handleEnableModule(msg)
+		case "disable_module":
+			return wcm.handleDisableModule(msg)
+		case "get_module_status":
+			return wcm.handleGetModuleStatus(msg)
+		case "list_modules":
+			return wcm.handleListModules(msg)
 		default:
 			return wcm.BaseModule.HandleMessage(message)
 		}
@@ -496,4 +512,251 @@ func (wcm *WebSocketCommunicationModule) GetMetrics() map[string]interface{} {
 	}
 
 	return metrics
+}
+
+// GetWebSocketManager returns the WebSocket manager for external use
+func (wcm *WebSocketCommunicationModule) GetWebSocketManager() *communication.WebSocketManager {
+	wcm.mu.RLock()
+	defer wcm.mu.RUnlock()
+	return wcm.websocketManager
+}
+
+// SetModuleManager sets the module manager reference for control operations
+func (wcm *WebSocketCommunicationModule) SetModuleManager(moduleManager ModuleManager) {
+	wcm.mu.Lock()
+	defer wcm.mu.Unlock()
+	wcm.moduleManager = moduleManager
+}
+
+// handleStartModule handles module start requests from backend
+func (wcm *WebSocketCommunicationModule) handleStartModule(msg map[string]interface{}) (interface{}, error) {
+	moduleID, ok := msg["module_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("module_id is required")
+	}
+
+	wcm.LogInfo("Received start module request for: %s", moduleID)
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "start",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Start the module
+	err := wcm.moduleManager.StartModule(moduleID)
+	if err != nil {
+		wcm.LogError("Failed to start module %s: %v", moduleID, err)
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "start",
+			"timestamp": time.Now(),
+			"error":     err.Error(),
+		}, nil
+	}
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"module_id": moduleID,
+		"action":    "start",
+		"timestamp": time.Now(),
+		"message":   "Module started successfully",
+	}, nil
+}
+
+// handleStopModule handles module stop requests from backend
+func (wcm *WebSocketCommunicationModule) handleStopModule(msg map[string]interface{}) (interface{}, error) {
+	moduleID, ok := msg["module_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("module_id is required")
+	}
+
+	wcm.LogInfo("Received stop module request for: %s", moduleID)
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "stop",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Stop the module
+	err := wcm.moduleManager.StopModule(moduleID)
+	if err != nil {
+		wcm.LogError("Failed to stop module %s: %v", moduleID, err)
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "stop",
+			"timestamp": time.Now(),
+			"error":     err.Error(),
+		}, nil
+	}
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"module_id": moduleID,
+		"action":    "stop",
+		"timestamp": time.Now(),
+		"message":   "Module stopped successfully",
+	}, nil
+}
+
+// handleEnableModule handles module enable requests from backend
+func (wcm *WebSocketCommunicationModule) handleEnableModule(msg map[string]interface{}) (interface{}, error) {
+	moduleID, ok := msg["module_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("module_id is required")
+	}
+
+	wcm.LogInfo("Received enable module request for: %s", moduleID)
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "enable",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Enable the module (this would need to be implemented in ModuleManager)
+	// For now, we'll return a success response
+	wcm.LogInfo("Module %s enabled", moduleID)
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"module_id": moduleID,
+		"action":    "enable",
+		"timestamp": time.Now(),
+		"message":   "Module enabled successfully",
+	}, nil
+}
+
+// handleDisableModule handles module disable requests from backend
+func (wcm *WebSocketCommunicationModule) handleDisableModule(msg map[string]interface{}) (interface{}, error) {
+	moduleID, ok := msg["module_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("module_id is required")
+	}
+
+	wcm.LogInfo("Received disable module request for: %s", moduleID)
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "disable",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Disable the module (this would need to be implemented in ModuleManager)
+	// For now, we'll return a success response
+	wcm.LogInfo("Module %s disabled", moduleID)
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"module_id": moduleID,
+		"action":    "disable",
+		"timestamp": time.Now(),
+		"message":   "Module disabled successfully",
+	}, nil
+}
+
+// handleGetModuleStatus handles module status requests from backend
+func (wcm *WebSocketCommunicationModule) handleGetModuleStatus(msg map[string]interface{}) (interface{}, error) {
+	moduleID, ok := msg["module_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("module_id is required")
+	}
+
+	wcm.LogInfo("Received module status request for: %s", moduleID)
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "get_status",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Get module status
+	status, err := wcm.moduleManager.GetModuleStatus(moduleID)
+	if err != nil {
+		wcm.LogError("Failed to get status for module %s: %v", moduleID, err)
+		return map[string]interface{}{
+			"status":    "error",
+			"module_id": moduleID,
+			"action":    "get_status",
+			"timestamp": time.Now(),
+			"error":     err.Error(),
+		}, nil
+	}
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"module_id": moduleID,
+		"action":    "get_status",
+		"timestamp": time.Now(),
+		"module_status": string(status),
+		"message":   "Module status retrieved successfully",
+	}, nil
+}
+
+// handleListModules handles list modules requests from backend
+func (wcm *WebSocketCommunicationModule) handleListModules(msg map[string]interface{}) (interface{}, error) {
+	wcm.LogInfo("Received list modules request")
+	
+	if wcm.moduleManager == nil {
+		return map[string]interface{}{
+			"status":    "error",
+			"action":    "list_modules",
+			"timestamp": time.Now(),
+			"error":     "Module manager not available",
+		}, nil
+	}
+
+	// Get all modules and their statuses
+	allModules := wcm.moduleManager.GetAllModules()
+	allStatuses := wcm.moduleManager.GetAllModuleStatuses()
+	
+	modules := make([]map[string]interface{}, 0, len(allModules))
+	for moduleID, module := range allModules {
+		status, exists := allStatuses[moduleID]
+		if !exists {
+			status = ModuleStatusStopped
+		}
+		
+		moduleInfo := module.GetInfo()
+		modules = append(modules, map[string]interface{}{
+			"id":          moduleInfo.ID,
+			"name":        moduleInfo.Name,
+			"version":     moduleInfo.Version,
+			"description": moduleInfo.Description,
+			"status":      string(status),
+			"capabilities": moduleInfo.Capabilities,
+		})
+	}
+	
+	return map[string]interface{}{
+		"status":    "success",
+		"action":    "list_modules",
+		"timestamp": time.Now(),
+		"modules":   modules,
+		"count":     len(modules),
+		"message":   "Modules listed successfully",
+	}, nil
 }

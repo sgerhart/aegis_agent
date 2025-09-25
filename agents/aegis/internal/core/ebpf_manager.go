@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	"agents/aegis/pkg/models"
@@ -142,6 +143,12 @@ func (em *EBPFManager) loadMap(mapName string) (*ebpf.Map, error) {
 	
 	m, err = ebpf.NewMap(mapSpec)
 	if err != nil {
+		// Check if it's a MEMLOCK permission issue
+		if strings.Contains(err.Error(), "MEMLOCK") || strings.Contains(err.Error(), "operation not permitted") {
+			log.Printf("[ebpf_manager] Warning: failed to create map %s due to insufficient permissions (MEMLOCK may be too low): %v", mapName, err)
+			log.Printf("[ebpf_manager] Consider running: sudo ulimit -l unlimited")
+			return nil, fmt.Errorf("failed to create map %s: creating map: map create: operation not permitted (MEMLOCK may be too low, consider rlimit.RemoveMemlock)", mapName)
+		}
 		return nil, fmt.Errorf("failed to create map %s: %w", mapName, err)
 	}
 	

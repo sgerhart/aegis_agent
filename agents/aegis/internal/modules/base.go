@@ -73,8 +73,16 @@ func (bm *BaseModule) Stop(ctx context.Context) error {
 		bm.cancel()
 	}
 	
-	// Close event channel
-	close(bm.eventChan)
+	// Close event channel safely - check if already closed
+	if bm.eventChan != nil {
+		select {
+		case <-bm.eventChan:
+			// Channel is already closed
+		default:
+			close(bm.eventChan)
+		}
+		bm.eventChan = nil
+	}
 	
 	bm.status = ModuleStatusStopped
 	bm.logger.LogInfo("module_stop", fmt.Sprintf("Base module stopped: %s", bm.info.ID), nil)
