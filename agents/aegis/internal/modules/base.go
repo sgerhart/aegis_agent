@@ -21,6 +21,7 @@ type BaseModule struct {
 	startTime  time.Time
 	metrics    map[string]interface{}
 	eventChan  chan telemetry.Event
+	closed     sync.Once // Ensure channel is closed only once
 }
 
 // NewBaseModule creates a new base module
@@ -73,16 +74,13 @@ func (bm *BaseModule) Stop(ctx context.Context) error {
 		bm.cancel()
 	}
 	
-	// Close event channel safely - check if already closed
-	if bm.eventChan != nil {
-		select {
-		case <-bm.eventChan:
-			// Channel is already closed
-		default:
+	// Close event channel safely using sync.Once
+	bm.closed.Do(func() {
+		if bm.eventChan != nil {
 			close(bm.eventChan)
+			bm.eventChan = nil
 		}
-		bm.eventChan = nil
-	}
+	})
 	
 	bm.status = ModuleStatusStopped
 	bm.logger.LogInfo("module_stop", fmt.Sprintf("Base module stopped: %s", bm.info.ID), nil)
