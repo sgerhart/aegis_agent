@@ -521,12 +521,7 @@ func (mm *ModuleManagerImpl) SetEventHandler(handler EventHandler) {
 func (mm *ModuleManagerImpl) Shutdown() error {
 	mm.logger.LogInfo("manager_info", "Shutting down module manager...", nil)
 	
-	// Stop all modules
-	if err := mm.StopAllModules(); err != nil {
-		mm.logger.LogError("manager_error", fmt.Sprintf("Error stopping modules during shutdown: %v", err), nil)
-	}
-	
-	// Cancel context
+	// Cancel context first to signal shutdown
 	mm.cancel()
 	
 	mm.logger.LogInfo("manager_info", "Module manager shutdown complete", nil)
