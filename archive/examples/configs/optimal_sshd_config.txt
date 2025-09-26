@@ -1,0 +1,92 @@
+# Optimal /etc/ssh/sshd_config for ARM64 Linux Host
+# This configuration enables secure SSH access with key authentication
+# Copy this to your Linux host: /etc/ssh/sshd_config
+
+# Basic SSH Configuration
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+ListenAddress ::
+
+# Host Keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Ciphers and algorithms
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+
+# Authentication Settings - KEY CONFIGURATION
+LoginGraceTime 2m
+PermitRootLogin yes
+StrictModes yes
+MaxAuthTries 6
+MaxSessions 10
+
+# Public Key Authentication - ENABLE THIS
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
+
+# Password Authentication - KEEP ENABLED FOR FALLBACK
+PasswordAuthentication yes
+PermitEmptyPasswords no
+
+# Challenge-response passwords (e.g. via PAM or other authentication methods)
+KbdInteractiveAuthentication no
+
+# Kerberos options
+KerberosAuthentication no
+KerberosOrLocalPasswd yes
+KerberosTicketCleanup yes
+KerberosGetAFSToken no
+
+# GSSAPI options
+GSSAPIAuthentication no
+GSSAPICleanupCredentials yes
+GSSAPIStrictAcceptorCheck yes
+GSSAPIKeyExchange no
+
+# Set this to 'yes' to enable PAM authentication, account processing,
+# and session processing.
+UsePAM yes
+
+# Connection Settings
+X11Forwarding yes
+X11DisplayOffset 10
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+PermitUserEnvironment no
+Compression delayed
+ClientAliveInterval 0
+ClientAliveCountMax 3
+UseDNS no
+
+# Allow specific users (adjust as needed)
+AllowUsers steve root
+
+# Security Settings
+PermitTunnel no
+GatewayPorts no
+PermitTTY yes
+PermitUserRC yes
+ChrootDirectory none
+VersionAddendum none
+Banner none
+DebianBanner no
+
+# Subsystem configuration
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Example of overriding settings on a per-user basis
+#Match User anoncvs
+#	X11Forwarding no
+#	AllowTcpForwarding no
+#	PermitTTY no
+#	ForceCommand cvs server

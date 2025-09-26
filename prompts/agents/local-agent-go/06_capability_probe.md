@@ -1,1 +1,0 @@
-- Probe kernel/BTF/hooks; publish agent.capability.

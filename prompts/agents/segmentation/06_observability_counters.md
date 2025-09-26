@@ -1,1 +1,0 @@
-Aggregate counters and publish to NATS.

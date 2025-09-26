@@ -1,0 +1,1 @@
+- Run full end-to-end smoke test.

@@ -1,1 +1,0 @@
-Attach connect4/6 programs to service cgroups.

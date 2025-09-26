@@ -1,0 +1,136 @@
+# SSH Troubleshooting Commands for Linux Host (192.168.193.128)
+# Run these commands on your Linux host to fix SSH key authentication
+
+# 1. First, check current SSH configuration
+echo "=== Current SSH Configuration ==="
+sudo cat /etc/ssh/sshd_config | grep -E "PubkeyAuthentication|PasswordAuthentication|MaxAuthTries|AllowUsers|PermitRootLogin"
+
+# 2. Check SSH service status
+echo "=== SSH Service Status ==="
+sudo systemctl status ssh
+sudo systemctl is-enabled ssh
+
+# 3. Check if SSH is listening on port 22
+echo "=== SSH Port Check ==="
+sudo ss -tlnp | grep :22
+
+# 4. Check SSH logs for authentication failures
+echo "=== Recent SSH Authentication Attempts ==="
+sudo tail -20 /var/log/auth.log | grep ssh
+
+# 5. Backup current SSH config
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+
+# 6. Check and fix authorized_keys file
+echo "=== Checking SSH Keys ==="
+ls -la ~/.ssh/
+echo "Authorized keys content:"
+cat ~/.ssh/authorized_keys 2>/dev/null || echo "No authorized_keys file found"
+
+# 7. Fix permissions on SSH files
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys 2>/dev/null || echo "No authorized_keys to fix"
+
+# 8. Create authorized_keys if it doesn't exist and add the key
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+# Add the SSH key (the one we generated)
+echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC2T5IyEUeJijRKmhTt8+c64EmzWOWyIIDd4xLwdI2mm7zBn0WortYvFgEHv0bpFhaIyJJjzuQGowEbiIuMZh3dwp30vdRNyQw3H/ZbyyoNvOC3yQgKZcK8UIPANjPIfrIWSLdluMMh756Avyo2aXqGlGoylH3Ng+d9wHqnqhL6+V9hftGE0cbpXnZMwgr+9nsWpz8hbDAH9Y8hRfOBseU93EfQKf+54prcDwspXJ0vj41/FSEx/UUNQSW7ZeLBcmVcHeVvWKKSKnZkCfLnKXULC/WB8Ekh9UMdEyJQIGR1TZ1z6/owB01NP8zG9gdTncgJRF5mqe8hD1f1t3FEggS1+2j811P2hX4nnE2RXphj7HGcDukI8Nf/67GLIroS9TIZaddGaOneZw3T+E2u53SJLqVn3juLr3M0RndLxCXagjxESV98N9b8LYf7Jq7phuJVNpCog80NrEhibE9MYqO0RzZqoIgPgu4xVOTC6Olf35tjlBdpGxRczPzxYD742aVlL6RStsDsTXl0cJfBLDqu/N/ukbr2e+/aeOT8MDVCAHgJGLN90Q5aWKFTPHSSIBSBNh3QwudQLVALT1U73RB83V4S6NKREmMHsw0XZpg8HWspSWsDEY9YXpIwXPtxc5yCmEbPFuXE5QFBHBH1Y5e8ub9V43bsAnzaneXakToL0Q== testhost-connection" > ~/.ssh/authorized_keys
+
+chmod 600 ~/.ssh/authorized_keys
+
+# 9. Update SSH configuration with secure settings
+sudo tee /etc/ssh/sshd_config << 'EOF'
+# SSH Configuration for ARM64 Linux Host
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+
+# Host Keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+
+# Authentication
+LoginGraceTime 2m
+PermitRootLogin yes
+StrictModes yes
+MaxAuthTries 10
+MaxSessions 10
+
+# Public Key Authentication - ENABLED
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# Password Authentication - ENABLED FOR FALLBACK
+PasswordAuthentication yes
+PermitEmptyPasswords no
+
+# Other authentication
+KbdInteractiveAuthentication no
+UsePAM yes
+
+# Connection settings
+X11Forwarding yes
+PrintMotd no
+TCPKeepAlive yes
+UseDNS no
+
+# Security
+PermitTunnel no
+GatewayPorts no
+
+# Allow specific users
+AllowUsers steve root
+
+# SFTP subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server
+EOF
+
+# 10. Test SSH configuration
+echo "=== Testing SSH Configuration ==="
+sudo sshd -t
+if [ $? -eq 0 ]; then
+    echo "✅ SSH configuration is valid"
+else
+    echo "❌ SSH configuration has errors"
+    exit 1
+fi
+
+# 11. Restart SSH service
+echo "=== Restarting SSH Service ==="
+sudo systemctl restart ssh
+sudo systemctl status ssh
+
+# 12. Wait a moment and test local SSH connection
+sleep 3
+echo "=== Testing Local SSH Connection ==="
+ssh -o ConnectTimeout=5 steve@localhost "echo 'Local SSH test successful'" || echo "Local SSH test failed"
+
+# 13. Check SSH logs after restart
+echo "=== SSH Logs After Restart ==="
+sudo tail -10 /var/log/auth.log
+
+# 14. Display connection information
+echo "=== Connection Information ==="
+echo "Host IP: $(hostname -I | awk '{print $1}')"
+echo "SSH Port: 22"
+echo "User: steve"
+echo "Key fingerprint:"
+ssh-keygen -l -f ~/.ssh/authorized_keys 2>/dev/null || echo "Could not get key fingerprint"
+
+echo ""
+echo "✅ SSH configuration complete!"
+echo ""
+echo "From Mac, test with:"
+echo "ssh -i ~/.ssh/testhost_key steve@$(hostname -I | awk '{print $1}')"
+echo ""
+echo "If still having issues, check:"
+echo "1. Firewall: sudo ufw status"
+echo "2. SELinux: getenforce"
+echo "3. SSH logs: sudo tail -f /var/log/auth.log"

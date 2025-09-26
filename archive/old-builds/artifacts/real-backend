@@ -1,0 +1,385 @@
+# AegisFlux Backend Specification for Agent Implementation
+
+## Architecture Overview
+
+```
+Backend Services → BPF Registry → Agent Polling → eBPF Programs
+      ↓                             ↑
+   NATS Bus ←─────── Telemetry ──────┘
+```
+
+## Service Endpoints & Ports
+
+| Service | Port | URL | Purpose |
+|---------|------|-----|---------|
+| **Actions API** | 8083 | `http://server:8083` | Agent registration & management |
+| **BPF Registry** | 8090 | `http://server:8090` | Artifact storage & distribution |
+| **Orchestrator** | 8084 | `http://server:8084` | Policy orchestration |
+| **Decision Engine** | 8087 | `http://server:8087` | Policy decisions |
+| **Config API** | 8085 | `http://server:8085` | Configuration management |
+| **NATS** | 4222 | `nats://server:4222` | Message bus |
+
+## Agent Communication Flow
+
+### 1. Agent Registration (Actions API - Port 8083)
+
+#### Phase 1: Registration Init
+```http
+POST http://server:8083/agents/register/init
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "org_id": "security-team",
+  "host_id": "unique-host-identifier",
+  "agent_pubkey": "base64-ed25519-public-key",
+  "machine_id_hash": "sha256-hash-of-machine-id",
+  "agent_version": "1.0.0",
+  "capabilities": {
+    "ebpf_loading": true,
+    "ebpf_attach": true,
+    "map_operations": true,
+    "kernel_modules": ["bpf", "netfilter"],
+    "supported_hooks": ["xdp", "tc", "tracepoint", "kprobe"],
+    "max_programs": 10,
+    "max_maps": 50
+  },
+  "platform": {
+    "hostname": "agent-host",
+    "os": "linux",
+    "kernel_version": "5.15.0-91-generic",
+    "architecture": "x86_64"
+  },
+  "network": {
+    "addrs": ["192.168.1.100/24"],
+    "ifaces": {
+      "eth0": {
+        "addrs": ["192.168.1.100/24"],
+        "mac": "00:1b:44:11:3a:b7"
+      }
+    }
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "registration_id": "uuid",
+  "nonce": "base64-encoded-32-byte-random-nonce",
+  "server_time": "2025-09-20T02:15:30Z"
+}
+```
+
+#### Phase 2: Registration Complete
+```http
+POST http://server:8083/agents/register/complete
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "registration_id": "uuid-from-phase1",
+  "host_id": "unique-host-identifier",
+  "signature": "base64-ed25519-signature-over-(nonce||server_time||host_id)"
+}
+```
+
+**Response:**
+```json
+{
+  "agent_uid": "agent-unique-id",
+  "bootstrap_token": "dev-token"
+}
+```
+
+### 2. Artifact Polling (BPF Registry - Port 8090)
+
+#### Poll for Assigned Artifacts
+```http
+GET http://server:8090/artifacts/for-host/{host_id}
+```
+
+**Response:**
+```json
+{
+  "artifacts": [
+    {
+      "id": "artifact_1758331322211061095",
+      "name": "icmp-block-8888",
+      "version": "1.0.0",
+      "description": "Block ICMP ping to 8.8.8.8",
+      "type": "program",
+      "architecture": "arm64",
+      "kernel_version": "5.4.0",
+      "created_at": "2025-09-20T01:22:02Z",
+      "size": 43,
+      "checksum": "sha256-hash",
+      "signature": "vault-signature",
+      "metadata": {
+        "policy_type": "network_block",
+        "target_ip": "8.8.8.8",
+        "protocol": "icmp"
+      },
+      "tags": ["network", "security", "icmp", "blocking"]
+    }
+  ],
+  "total": 1
+}
+```
+
+#### Download Artifact Binary
+```http
+GET http://server:8090/artifacts/{artifact_id}/binary
+```
+
+**Response:**
+- Content-Type: `application/octet-stream`
+- Body: tar.zst compressed eBPF program
+
+### 3. Telemetry Reporting (NATS - Port 4222)
+
+#### Connect to NATS
+```go
+nc, err := nats.Connect("nats://server:4222")
+```
+
+#### Send Telemetry Events
+```json
+// Subject: aegis.telemetry.host.{host_id}
+{
+  "timestamp": "2025-09-20T02:15:30Z",
+  "host_id": "unique-host-identifier",
+  "agent_uid": "agent-unique-id",
+  "event_type": "program_loaded",
+  "data": {
+    "artifact_id": "artifact_1758331322211061095",
+    "program_name": "icmp-block-8888",
+    "status": "success",
+    "load_time_ms": 150
+  }
+}
+```
+
+## Agent Implementation Requirements
+
+### 1. Polling Loop
+```
+AGENT_POLL_INTERVAL_SEC=30  # Poll every 30 seconds
+```
+
+**Algorithm:**
+1. Poll BPF Registry for artifacts assigned to this host
+2. Compare with currently loaded programs
+3. Download new artifacts
+4. Verify signatures
+5. Load eBPF programs
+6. Send telemetry
+
+### 2. Environment Variables
+```bash
+# Required
+AGENT_HOST_ID=unique-host-identifier
+AGENT_REGISTRY_URL=http://server:8090
+AGENT_ACTIONS_URL=http://server:8083
+AGENT_NATS_URL=nats://server:4222
+
+# Optional
+AGENT_POLL_INTERVAL_SEC=30
+AGENT_VAULT_URL=http://server:8200
+AGENT_VAULT_TOKEN=dev-token
+AGENT_LOG_LEVEL=info
+```
+
+### 3. Artifact Processing
+
+#### Artifact Structure (tar.zst)
+```
+artifact.tar.zst
+├── program.o           # Compiled eBPF program
+├── metadata.json       # Program metadata
+└── config.json         # Runtime configuration
+```
+
+#### Metadata Format
+```json
+{
+  "program_type": "tc_classifier",
+  "attach_point": "eth0",
+  "section": "classifier",
+  "maps": [
+    {
+      "name": "blocked_ips",
+      "type": "hash",
+      "key_size": 4,
+      "value_size": 1,
+      "max_entries": 1024
+    }
+  ],
+  "initial_data": {
+    "blocked_ips": {
+      "8.8.8.8": 1
+    }
+  }
+}
+```
+
+### 4. eBPF Program Lifecycle
+
+#### Load Program
+1. Extract artifact from tar.zst
+2. Verify signature against Vault public key
+3. Load eBPF program using libbpf
+4. Attach to specified hook (TC, XDP, etc.)
+5. Initialize maps with data from metadata
+6. Send telemetry: program_loaded
+
+#### Unload Program
+1. Detach from kernel hook
+2. Unload eBPF program
+3. Clean up maps
+4. Send telemetry: program_unloaded
+
+### 5. Health & Status Endpoints
+
+The agent should implement these endpoints for backend monitoring:
+
+```http
+GET http://agent:7070/health
+GET http://agent:7070/status
+GET http://agent:7070/stats
+```
+
+**Status Response:**
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "host_id": "unique-host-identifier",
+  "agent_uid": "agent-unique-id",
+  "registered": true,
+  "backend_connected": true,
+  "last_poll": "2025-09-20T02:15:30Z",
+  "programs": {
+    "loaded": 1,
+    "active": 1,
+    "failed": 0
+  },
+  "artifacts": [
+    {
+      "id": "artifact_1758331322211061095",
+      "name": "icmp-block-8888",
+      "status": "loaded",
+      "loaded_at": "2025-09-20T02:15:30Z"
+    }
+  ]
+}
+```
+
+## Key Differences from agent-integration Document
+
+| Aspect | agent-integration Doc | AegisFlux Backend |
+|--------|----------------------|-------------------|
+| **Communication** | Push-based (POST to agent) | Pull-based (agent polls) |
+| **Format** | JSON policies | eBPF artifacts (tar.zst) |
+| **Endpoint** | `POST agent:7070/policies` | `GET registry:8090/artifacts/for-host/{id}` |
+| **Storage** | Direct eBPF map updates | Artifact download & loading |
+| **Enforcement** | Real-time rule changes | Program deployment |
+
+## Message Bus Integration (NATS)
+
+### Subjects
+- `aegis.telemetry.host.{host_id}` - Agent telemetry
+- `aegis.assignments.created` - New assignments (future)
+- `aegis.visibility.host.{host_id}` - Host visibility data
+
+### Telemetry Events
+```json
+// Program lifecycle
+{"event_type": "program_loaded", "artifact_id": "...", "status": "success"}
+{"event_type": "program_unloaded", "artifact_id": "...", "reason": "ttl_expired"}
+{"event_type": "program_failed", "artifact_id": "...", "error": "..."}
+
+// Enforcement events
+{"event_type": "packet_dropped", "rule_id": "...", "src_ip": "...", "dest_ip": "..."}
+{"event_type": "policy_violation", "policy_id": "...", "details": "..."}
+
+// System health
+{"event_type": "heartbeat", "uptime_seconds": 3600, "memory_mb": 45, "cpu_percent": 2.1}
+```
+
+## Current Limitations & Missing Features
+
+### Missing (Need Implementation)
+1. **Host Assignment API** - No way to assign artifacts to specific hosts
+2. **Policy Assignment Interface** - No high-level policy → artifact mapping
+3. **Real-time Updates** - Only polling-based, no push notifications
+4. **Advanced Scheduling** - No time-based or conditional policies
+
+### Working Components
+1. ✅ Agent registration (Actions API)
+2. ✅ Artifact creation & signing (BPF Registry)
+3. ✅ Telemetry bus (NATS)
+4. ✅ Service orchestration
+
+## Summary for Agent Development
+
+**Your agent should:**
+1. Register with Actions API (port 8083) using Ed25519 cryptography
+2. Poll BPF Registry (port 8090) every 30 seconds for assigned artifacts
+3. Download, verify, and load eBPF programs from tar.zst artifacts
+4. Send telemetry via NATS (port 4222)
+5. Implement health endpoints on port 7070 for monitoring
+
+**Key Implementation Note:** The backend uses an artifact-based deployment model, not a policy-push model. Agents download and load pre-compiled eBPF programs rather than receiving high-level policies for real-time translation.
+
+
+## 🚀 ASSIGNMENT API (NEWLY IMPLEMENTED)
+
+### Management Endpoints for Policy Deployment
+
+| Endpoint | Method | Purpose | Example |
+|----------|--------|---------|---------|
+| `/assign/{artifact_id}/{host_id}` | POST | Assign artifact to single host | `POST /assign/artifact_123/host-1` |
+| `/unassign/{artifact_id}/{host_id}` | DELETE | Remove artifact from host | `DELETE /unassign/artifact_123/host-1` |
+| `/hosts/{artifact_id}` | PUT | Bulk host management | `PUT /hosts/artifact_123` + JSON body |
+
+### Assignment Workflow
+
+```mermaid
+graph TD
+    A[Admin/Orchestrator] -->|POST /assign| B[BPF Registry]
+    B -->|Updates metadata| C[Artifact + Hosts Array]
+    D[Agent] -->|GET /artifacts/for-host/{id}| B
+    B -->|Returns assigned artifacts| D
+    D -->|GET /artifacts/{id}/binary| B
+    B -->|Returns eBPF program| D
+```
+
+### Example Assignment Commands
+
+```bash
+# Assign artifact to specific host
+curl -X POST http://server:8090/assign/artifact_123/production-server-1
+
+# Bulk assignment to multiple hosts  
+curl -X PUT http://server:8090/hosts/artifact_123 \
+  -H "Content-Type: application/json" \
+  -d '{"hosts": ["host-1", "host-2", "host-3"]}'
+
+# Remove assignment
+curl -X DELETE http://server:8090/unassign/artifact_123/host-1
+```
+
+### ✅ Status: BACKEND READY
+
+**The assignment functionality has been fully implemented and tested.**
+- ✅ Assignment API working
+- ✅ Host association persisted  
+- ✅ Agent polling returns assigned artifacts
+- ✅ End-to-end policy distribution functional
+
+**Your agent can now successfully poll for and receive assigned eBPF policies!**

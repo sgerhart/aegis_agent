@@ -1,0 +1,1 @@
+- Auto-rollback if CPU usage exceeds threshold.

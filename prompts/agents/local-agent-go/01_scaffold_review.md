@@ -1,1 +1,0 @@
-- Build scaffold and run ./aegisflux-agent; check /healthz and /status.

@@ -1,0 +1,1 @@
+Implement capability detection, publish to NATS.

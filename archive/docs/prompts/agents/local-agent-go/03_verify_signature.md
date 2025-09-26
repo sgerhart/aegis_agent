@@ -1,0 +1,1 @@
+- Verify signatures with Vault or dev pubkey.

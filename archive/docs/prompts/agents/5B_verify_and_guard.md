@@ -1,0 +1,4 @@
+- Implement real signature verification (Vault/AppRole or dev pubkey).
+- Run capability.Probe() at startup and publish via capability.Publish (NATS 'agent.capability').
+- Add CPUWatcher sampling; auto-rollback when over AGENT_CPU_MAX (default 3%).
+- Extend /status with cpu_pct and last verifier error.

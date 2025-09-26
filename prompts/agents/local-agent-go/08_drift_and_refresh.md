@@ -1,1 +1,0 @@
-- Detect drift; refresh TTL when extended.
