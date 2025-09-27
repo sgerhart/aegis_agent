@@ -37,6 +37,7 @@ type WebSocketManager struct {
 	isRegistered      bool
 	isAuthenticated   bool
 	isReconnecting    bool  // Flag to prevent reconnection loops
+	connectionFailureCount int // Track consecutive connection failures
 	connection        *websocket.Conn
 	reconnectDelay    time.Duration
 	maxReconnectDelay time.Duration
@@ -445,6 +446,8 @@ func (wsm *WebSocketManager) connect() error {
 		log.Printf("[websocket] Already registered, skipping registration")
 	}
 	
+	// Reset connection failure count on successful connection
+	wsm.connectionFailureCount = 0
 	log.Printf("[websocket] Connected to backend at %s", wsm.backendURL)
 	return nil
 }
@@ -457,7 +460,13 @@ func (wsm *WebSocketManager) clearSessionCredentials() {
 	wsm.bootstrapToken = ""
 	wsm.isAuthenticated = false
 	wsm.isRegistered = false
+	wsm.connectionFailureCount = 0
 	log.Printf("[websocket] Session credentials cleared")
+}
+
+// incrementConnectionFailureCount increments the connection failure counter
+func (wsm *WebSocketManager) incrementConnectionFailureCount() {
+	wsm.connectionFailureCount++
 }
 
 // performWebSocketRegistration performs agent registration through WebSocket messages (as per working example)
@@ -1338,9 +1347,16 @@ func (wsm *WebSocketManager) reconnect() error {
 	wsm.connectionState = "reconnecting"
 	wsm.mu.Unlock()
 
-	// Clear session credentials on reconnection to prevent stale session issues
-	// This ensures we don't try to reuse invalid session data
-	wsm.clearSessionCredentials()
+	// Only clear session credentials if we've had multiple consecutive failures
+	// This prevents clearing valid sessions due to temporary network issues
+	wsm.incrementConnectionFailureCount()
+	if wsm.connectionFailureCount >= 3 {
+		log.Printf("[websocket] Multiple connection failures (%d), clearing session credentials", wsm.connectionFailureCount)
+		wsm.clearSessionCredentials()
+		wsm.connectionFailureCount = 0
+	} else {
+		log.Printf("[websocket] Connection failure %d, preserving session credentials", wsm.connectionFailureCount)
+	}
 
 	// Wait before reconnecting with exponential backoff
 	time.Sleep(wsm.reconnectDelay)
