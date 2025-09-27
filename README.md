@@ -53,6 +53,10 @@ python3 test_module_control.py
 
 📖 **[Complete Documentation](./docs/README.md)** - Organized documentation index
 
+### 📋 **Project Status**
+- **[🎯 TODO Checklist](./TODO_CHECKLIST.md)** - Production readiness checklist
+- **[📊 Agent Capabilities Report](./AGENT_CAPABILITIES_REPORT.md)** - Comprehensive capabilities and architecture
+
 ### 👥 **For Users** (Easy-to-read guides)
 - **[🚀 Quick Start Guide](docs/users/QUICK_START_GUIDE.md)** - Get up and running in 5 minutes
 - **[📦 Installation Guide](docs/users/INSTALLATION_GUIDE.md)** - Complete installation instructions  
@@ -64,6 +68,7 @@ python3 test_module_control.py
 - **[🏗️ System Architecture](docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md)** - Detailed architecture documentation
 - **[📊 Architecture Diagrams](docs/architecture/AGENT_ARCHITECTURE_DIAGRAM.md)** - Visual architecture and module specifications
 - **[🔌 Module Connectivity](docs/architecture/MODULE_CONNECTIVITY_SPECIFICATION.md)** - Backend service connectivity matrix
+- **[🗄️ Graph Database Design](docs/architecture/GRAPH_DATABASE_DESIGN.md)** - Local host intelligence and graph replication
 
 ## 🔧 **Build Targets**
 
