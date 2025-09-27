@@ -1,74 +1,131 @@
 # 📚 Aegis Agent Documentation
 
-This directory contains all documentation for the Aegis Agent project, organized by category.
+Welcome to the Aegis Agent documentation! This directory contains comprehensive guides for both users and engineers.
 
-## 📁 Directory Structure
+## 🎯 Quick Navigation
 
-### 🔍 [analysis/](./analysis/)
-Root cause analysis and technical deep-dives:
-- `COMPREHENSIVE_TECHNICAL_ANALYSIS.md` - **CONSOLIDATED** - All technical analysis, authentication issues, signature verification, performance analysis, and backend storage issues
+### 👥 **For Users** (Easy-to-read guides)
+- **[Quick Start Guide](users/QUICK_START_GUIDE.md)** - Get up and running in 5 minutes
+- **[Installation Guide](users/INSTALLATION_GUIDE.md)** - Complete installation instructions
+- **[Troubleshooting Guide](users/TROUBLESHOOTING_GUIDE.md)** - Common issues and solutions
 
-### 📖 [guides/](./guides/)
-Comprehensive guides and how-to documentation:
-- `COMPREHENSIVE_AGENT_GUIDE.md` - **CONSOLIDATED** - Complete connection guide, troubleshooting, and production readiness checklist
+### 🔧 **For Engineers** (Technical documentation)
+- **[WebSocket Protocol Specification](engineers/WEBSOCKET_PROTOCOL_SPECIFICATION.md)** - Complete protocol reference
+- **[Agent Registration Implementation](engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)** - Registration flow and code examples
+- **[Backend Team Handoff](engineers/BACKEND_TEAM_HANDOFF.md)** - Backend integration details
+- **[Agent Working Example](engineers/AGENT_WORKING_EXAMPLE.md)** - Complete working code examples
 
-### 🧪 [testing/](./testing/)
-Testing scripts and tools:
-- `AGENT_CONNECTION_TEST.py` - Python test script for WebSocket connection
-- `test_agent_*.sh` - Various agent testing scripts
-- `test_module_control.py` - Module control testing
-- `debug_registration.sh` - Registration debugging script
-- `run-agent-clean.sh` - Clean agent execution script
+## 📖 Documentation Structure
 
-### 🚀 [deployment/](./deployment/)
-Deployment scripts and guides:
-- `COMPREHENSIVE_DEPLOYMENT_GUIDE.md` - **CONSOLIDATED** - All deployment guides, checklists, and deployment procedures
+```
+docs/
+├── users/                    # User-friendly guides
+│   ├── QUICK_START_GUIDE.md
+│   ├── INSTALLATION_GUIDE.md
+│   └── TROUBLESHOOTING_GUIDE.md
+├── engineers/                # Technical documentation
+│   ├── WEBSOCKET_PROTOCOL_SPECIFICATION.md
+│   ├── AGENT_REGISTRATION_IMPLEMENTATION.md
+│   ├── BACKEND_TEAM_HANDOFF.md
+│   ├── AGENT_WORKING_EXAMPLE.md
+│   ├── AGENT_SIGNATURE_FIX.md
+│   └── AGENT_TEAM_FINAL_SOLUTION.md
+├── api/                      # API references
+│   └── COMPREHENSIVE_API_REFERENCE.md
+├── architecture/             # System architecture
+│   └── MODULAR_ARCHITECTURE_SUMMARY.md
+├── deployment/               # Deployment guides
+│   └── COMPREHENSIVE_DEPLOYMENT_GUIDE.md
+├── testing/                  # Testing documentation
+│   └── COMPREHENSIVE_TESTING_GUIDE.md
+├── guides/                   # General guides
+│   └── COMPREHENSIVE_AGENT_GUIDE.md
+├── analysis/                 # Technical analysis
+│   └── COMPREHENSIVE_TECHNICAL_ANALYSIS.md
+└── summaries/                # Project summaries
+    └── COMPREHENSIVE_PROJECT_SUMMARY.md
+```
 
-### 📋 [api/](./api/)
-Backend API documentation:
-- `COMPREHENSIVE_API_REFERENCE.md` - **CONSOLIDATED** - All API documentation, WebSocket protocol, backend testing, and team handoff information
+## 🚀 Getting Started
 
-### 🏗️ [architecture/](./architecture/)
-System architecture documentation:
-- `MODULAR_ARCHITECTURE_SUMMARY.md` - Agent modular architecture
-- `OPTIONAL_MODULES_SUMMARY.md` - Optional modules overview
-- `PHASE_3_BACKEND_ARCHITECTURE.md` - Phase 3 backend design
-- `PHASE_3_WEBSOCKET_COMMUNICATION_SUMMARY.md` - WebSocket communication
+### **New Users**
+1. Start with the [Quick Start Guide](users/QUICK_START_GUIDE.md)
+2. Follow the [Installation Guide](users/INSTALLATION_GUIDE.md) if needed
+3. Use the [Troubleshooting Guide](users/TROUBLESHOOTING_GUIDE.md) for issues
 
-### 🔒 [communication/](./communication/)
-Communication protocol documentation:
-- `SECURE_AGENT_BACKEND_COMMUNICATION.md` - Secure communication protocols
+### **Developers**
+1. Read the [WebSocket Protocol Specification](engineers/WEBSOCKET_PROTOCOL_SPECIFICATION.md)
+2. Study the [Agent Registration Implementation](engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)
+3. Reference the [Backend Team Handoff](engineers/BACKEND_TEAM_HANDOFF.md) for integration
 
-### 📊 [summaries/](./summaries/)
-Project summaries and cleanup reports:
-- `COMPREHENSIVE_PROJECT_SUMMARY.md` - **CONSOLIDATED** - All project summaries, cleanup reports, and status updates
+### **System Administrators**
+1. Review the [Installation Guide](users/INSTALLATION_GUIDE.md)
+2. Check the [Deployment Guide](deployment/COMPREHENSIVE_DEPLOYMENT_GUIDE.md)
+3. Keep the [Troubleshooting Guide](users/TROUBLESHOOTING_GUIDE.md) handy
 
-## 🎯 Quick Start
+## 📋 Key Features
 
-### For Developers
-1. Start with [COMPREHENSIVE_AGENT_GUIDE.md](./guides/COMPREHENSIVE_AGENT_GUIDE.md)
-2. Review [COMPREHENSIVE_TECHNICAL_ANALYSIS.md](./analysis/COMPREHENSIVE_TECHNICAL_ANALYSIS.md) for technical details
-3. Use [testing/](./testing/) scripts for validation
+### **Security**
+- **Real-time threat detection** - Monitors system activities and network traffic
+- **Policy enforcement** - Automatically blocks suspicious activities
+- **Secure communication** - Uses WebSocket with Ed25519 signatures
+- **Session management** - Proper authentication and session handling
 
-### For Operations
-1. Check [COMPREHENSIVE_AGENT_GUIDE.md](./guides/COMPREHENSIVE_AGENT_GUIDE.md) for production readiness
-2. Use [COMPREHENSIVE_DEPLOYMENT_GUIDE.md](./deployment/COMPREHENSIVE_DEPLOYMENT_GUIDE.md) for deployment
-3. Reference troubleshooting sections in the comprehensive guides
+### **Reliability**
+- **Auto-reconnection** - Handles network interruptions gracefully
+- **Session persistence** - Maintains state across reconnections
+- **Error recovery** - Robust error handling and recovery mechanisms
+- **Health monitoring** - Continuous health checks and reporting
 
-### For Backend Integration
-1. Review [COMPREHENSIVE_API_REFERENCE.md](./api/COMPREHENSIVE_API_REFERENCE.md)
-2. Check [SECURE_AGENT_BACKEND_COMMUNICATION.md](./communication/SECURE_AGENT_BACKEND_COMMUNICATION.md)
-3. Use [AGENT_CONNECTION_TEST.py](./testing/AGENT_CONNECTION_TEST.py) for testing
+### **Performance**
+- **Low resource usage** - Optimized for production environments
+- **Efficient monitoring** - Uses eBPF for high-performance system monitoring
+- **Scalable architecture** - Supports multiple agents and backend scaling
 
-## 🚀 Current Status
+## 🔍 Common Use Cases
 
-✅ **Production Ready**: Agent successfully authenticates and registers via WebSocket
-✅ **Stable Connection**: Automatic reconnection and graceful error handling
-✅ **Full Documentation**: Complete guides and troubleshooting resources
+### **Production Deployment**
+- Deploy agents on critical servers
+- Monitor real-time security events
+- Enforce security policies automatically
+
+### **Development & Testing**
+- Test agent functionality
+- Debug communication issues
+- Develop custom integrations
+
+### **Troubleshooting**
+- Diagnose connection problems
+- Analyze security events
+- Monitor agent performance
 
 ## 📞 Support
 
-For issues or questions:
-1. Check the [troubleshooting guide](./guides/AGENT_TROUBLESHOOTING_GUIDE.md)
-2. Review [analysis documents](./analysis/) for technical details
-3. Use [testing scripts](./testing/) to validate functionality
+### **Documentation Issues**
+- Check the [Troubleshooting Guide](users/TROUBLESHOOTING_GUIDE.md) first
+- Review relevant technical documentation in `engineers/`
+- Look for similar issues in the project history
+
+### **Technical Questions**
+- Reference the [WebSocket Protocol Specification](engineers/WEBSOCKET_PROTOCOL_SPECIFICATION.md)
+- Check the [Agent Registration Implementation](engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)
+- Review the [Backend Team Handoff](engineers/BACKEND_TEAM_HANDOFF.md)
+
+### **Getting Help**
+1. **Check logs first**: `sudo journalctl -u aegis-agent`
+2. **Review documentation**: Use this README to find relevant guides
+3. **Search existing issues**: Look for similar problems in project history
+4. **Contact support**: Provide logs and system information
+
+## 🔄 Documentation Updates
+
+This documentation is actively maintained and updated with each release. Key areas of focus:
+
+- **User guides** - Simplified, step-by-step instructions
+- **Technical specs** - Complete implementation details
+- **Troubleshooting** - Common issues and solutions
+- **Examples** - Working code and configuration samples
+
+---
+
+**📚 Happy reading!** This documentation is designed to help you get the most out of Aegis Agent, whether you're a user, developer, or system administrator.

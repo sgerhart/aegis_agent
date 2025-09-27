@@ -53,13 +53,15 @@ python3 test_module_control.py
 
 📖 **[Complete Documentation](./docs/README.md)** - Organized documentation index
 
-### Quick Links:
-- **🚀 Production Setup**: [`docs/guides/PRODUCTION_READINESS_CHECKLIST.md`](./docs/guides/PRODUCTION_READINESS_CHECKLIST.md)
-- **🔌 Connection Guide**: [`docs/guides/AGENT_TEAM_CONNECTION_GUIDE.md`](./docs/guides/AGENT_TEAM_CONNECTION_GUIDE.md)
-- **🔧 Troubleshooting**: [`docs/guides/AGENT_TROUBLESHOOTING_GUIDE.md`](./docs/guides/AGENT_TROUBLESHOOTING_GUIDE.md)
-- **📡 WebSocket Protocol**: [`docs/api/WEBSOCKET_PROTOCOL_SPECIFICATION.md`](./docs/api/WEBSOCKET_PROTOCOL_SPECIFICATION.md)
-- **🏗️ Architecture**: [`docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md`](./docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md)
-- **🧪 Testing**: [`docs/testing/AGENT_CONNECTION_TEST.py`](./docs/testing/AGENT_CONNECTION_TEST.py)
+### 👥 **For Users** (Easy-to-read guides)
+- **[🚀 Quick Start Guide](docs/users/QUICK_START_GUIDE.md)** - Get up and running in 5 minutes
+- **[📦 Installation Guide](docs/users/INSTALLATION_GUIDE.md)** - Complete installation instructions  
+- **[🛠️ Troubleshooting Guide](docs/users/TROUBLESHOOTING_GUIDE.md)** - Common issues and solutions
+
+### 🔧 **For Engineers** (Technical documentation)
+- **[🔌 WebSocket Protocol Specification](docs/engineers/WEBSOCKET_PROTOCOL_SPECIFICATION.md)** - Complete communication protocol
+- **[📝 Agent Registration Implementation](docs/engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)** - Registration flow and code examples
+- **[🏗️ System Architecture](docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md)** - Detailed architecture documentation
 
 ## 🔧 **Build Targets**
 
