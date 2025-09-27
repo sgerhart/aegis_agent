@@ -38,9 +38,10 @@ func main() {
 
 	// Handle special flags
 	if *showVersion {
-		fmt.Println("Aegis Agent v1.0.0")
+		fmt.Println("Aegis Agent v1.0.1")
 		fmt.Println("Build: " + getBuildInfo())
 		fmt.Println("Go Version: " + getGoVersion())
+		fmt.Println("Registration Fix: WebSocket Gateway URL")
 		os.Exit(0)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -23,6 +24,7 @@ type EBPFManager struct {
 	
 	// State
 	initialized bool
+	supported   bool // Whether eBPF is supported on this platform
 	mu          sync.RWMutex
 }
 
@@ -34,12 +36,27 @@ func NewEBPFManager() (*EBPFManager, error) {
 		maps:     make(map[string]*ebpf.Map),
 	}
 	
+	// Check if eBPF is supported on this platform
+	em.supported = isEBPFSupported()
+	
+	if !em.supported {
+		log.Printf("[ebpf_manager] eBPF not supported on %s/%s, running in compatibility mode", runtime.GOOS, runtime.GOARCH)
+		em.initialized = true
+		return em, nil
+	}
+	
 	if err := em.initialize(); err != nil {
 		return nil, fmt.Errorf("failed to initialize eBPF manager: %w", err)
 	}
 	
 	log.Printf("[ebpf_manager] eBPF manager initialized successfully")
 	return em, nil
+}
+
+// isEBPFSupported checks if eBPF is supported on the current platform
+func isEBPFSupported() bool {
+	// eBPF is only supported on Linux
+	return runtime.GOOS == "linux"
 }
 
 // initialize initializes the eBPF manager
@@ -49,6 +66,13 @@ func (em *EBPFManager) initialize() error {
 	
 	if em.initialized {
 		return fmt.Errorf("eBPF manager already initialized")
+	}
+	
+	// If eBPF is not supported, skip initialization
+	if !em.supported {
+		em.initialized = true
+		log.Printf("[ebpf_manager] Skipping eBPF initialization on unsupported platform")
+		return nil
 	}
 	
 	// Load eBPF maps
@@ -72,6 +96,12 @@ func (em *EBPFManager) initialize() error {
 
 // loadMaps loads eBPF maps
 func (em *EBPFManager) loadMaps() error {
+	// If eBPF is not supported, skip loading maps
+	if !em.supported {
+		log.Printf("[ebpf_manager] Skipping eBPF map loading on unsupported platform")
+		return nil
+	}
+	
 	// Load basic eBPF maps
 	mapNames := []string{
 		"aegis_blocked_destinations",
@@ -157,6 +187,12 @@ func (em *EBPFManager) loadMap(mapName string) (*ebpf.Map, error) {
 
 // loadPrograms loads eBPF programs
 func (em *EBPFManager) loadPrograms() error {
+	// If eBPF is not supported, skip loading programs
+	if !em.supported {
+		log.Printf("[ebpf_manager] Skipping eBPF program loading on unsupported platform")
+		return nil
+	}
+	
 	// For now, we'll skip program loading as it requires compiled eBPF objects
 	// In production, this would load the actual eBPF programs
 	log.Printf("[ebpf_manager] Program loading skipped (requires compiled eBPF objects)")
@@ -165,6 +201,12 @@ func (em *EBPFManager) loadPrograms() error {
 
 // attachPrograms attaches eBPF programs
 func (em *EBPFManager) attachPrograms() error {
+	// If eBPF is not supported, skip program attachment
+	if !em.supported {
+		log.Printf("[ebpf_manager] Skipping eBPF program attachment on unsupported platform")
+		return nil
+	}
+	
 	// For now, we'll skip program attachment
 	// In production, this would attach programs to appropriate hooks
 	log.Printf("[ebpf_manager] Program attachment skipped (requires eBPF programs)")

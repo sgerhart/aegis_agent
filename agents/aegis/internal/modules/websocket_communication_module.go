@@ -64,11 +64,18 @@ func (wcm *WebSocketCommunicationModule) Initialize(ctx context.Context, config 
 		backendURL = "wss://backend.aegis.com/ws/agent"
 	}
 	
+	// Get agent ID from config, fallback to module ID if not provided
+	agentID, ok := config.Settings["agent_id"].(string)
+	if !ok {
+		agentID = wcm.GetInfo().ID
+	}
+	
 	// Debug logging
 	fmt.Printf("[websocket_module] Backend URL from config: %s (found: %t)\n", backendURL, ok)
+	fmt.Printf("[websocket_module] Agent ID from config: %s (found: %t)\n", agentID, ok)
 
 	// Initialize WebSocket manager
-	websocketManager, err := communication.NewWebSocketManager(wcm.GetInfo().ID, backendURL)
+	websocketManager, err := communication.NewWebSocketManager(agentID, backendURL)
 	if err != nil {
 		return fmt.Errorf("failed to create WebSocket manager: %w", err)
 	}
@@ -97,10 +104,13 @@ func (wcm *WebSocketCommunicationModule) Start(ctx context.Context) error {
 		return err
 	}
 
+	wcm.LogInfo("Starting WebSocket manager...")
 	// Start WebSocket connection
 	if err := wcm.websocketManager.Start(); err != nil {
+		wcm.LogError("Failed to start WebSocket manager: %v", err)
 		return fmt.Errorf("failed to start WebSocket manager: %w", err)
 	}
+	wcm.LogInfo("WebSocket manager started successfully")
 
 	// Start background processes
 	go wcm.monitorConnection()

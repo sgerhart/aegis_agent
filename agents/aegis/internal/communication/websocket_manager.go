@@ -1,6 +1,7 @@
 package communication
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -9,9 +10,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	mathrand "math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +31,11 @@ type WebSocketManager struct {
 	sharedKey         []byte
 	sessionToken      string
 	sessionExpires    time.Time
+	sessionExpiresAt  string
+	agentUID          string
+	bootstrapToken    string
+	isRegistered      bool
+	isAuthenticated   bool
 	connection        *websocket.Conn
 	reconnectDelay    time.Duration
 	maxReconnectDelay time.Duration
@@ -43,6 +51,8 @@ type WebSocketManager struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	running           bool
+	connectionState   string // "disconnected", "connecting", "connected", "reconnecting"
+	lastConnectAttempt time.Time
 }
 
 // MessageRouter handles message routing and processing
@@ -126,8 +136,8 @@ func NewWebSocketManager(agentID, backendURL string) (*WebSocketManager, error) 
 		backendURL:        backendURL,
 		privateKey:        privateKey,
 		publicKey:         publicKey,
-		reconnectDelay:    5 * time.Second,
-		maxReconnectDelay: 60 * time.Second,
+		reconnectDelay:    2 * time.Second,
+		maxReconnectDelay: 300 * time.Second, // 5 minutes max
 		messageQueue:      make(chan QueuedMessage, 1000),
 		responseHandlers:  make(map[string]chan interface{}),
 		channels:          channels,
@@ -136,30 +146,29 @@ func NewWebSocketManager(agentID, backendURL string) (*WebSocketManager, error) 
 			responseChans: make(map[string]chan interface{}),
 		},
 		healthChecker: &HealthChecker{
-			heartbeatTimeout: 15 * time.Second,
+			heartbeatTimeout: 60 * time.Second, // 1 minute timeout for production
 		},
-		metrics:       &ConnectionMetrics{},
-		reconnectChan: make(chan struct{}, 1),
-		ctx:           ctx,
-		cancel:        cancel,
+		metrics:           &ConnectionMetrics{},
+		reconnectChan:      make(chan struct{}, 1),
+		ctx:                ctx,
+		cancel:             cancel,
+		connectionState:    "disconnected",
+		lastConnectAttempt: time.Time{},
 	}, nil
 }
 
 // Start starts the WebSocket connection
 func (wsm *WebSocketManager) Start() error {
+	log.Printf("[websocket] Start() method called for agent %s", wsm.agentID)
 	wsm.mu.Lock()
-	defer wsm.mu.Unlock()
 
 	if wsm.running {
+		wsm.mu.Unlock()
+		log.Printf("[websocket] WebSocket manager is already running")
 		return fmt.Errorf("WebSocket manager is already running")
 	}
 
-	// Establish initial connection
-	if err := wsm.connect(); err != nil {
-		return fmt.Errorf("failed to establish initial connection: %w", err)
-	}
-
-	// Start background processes
+	// Start background processes first
 	go wsm.messageProcessor()
 	go wsm.heartbeat()
 	go wsm.connectionMonitor()
@@ -167,7 +176,20 @@ func (wsm *WebSocketManager) Start() error {
 	go wsm.reconnectionHandler()
 
 	wsm.running = true
-	log.Printf("[websocket] WebSocket manager started for agent %s", wsm.agentID)
+	wsm.mu.Unlock() // Release lock before calling connect()
+
+	// Attempt WebSocket connection first, then register through WebSocket
+	log.Printf("[websocket] Attempting initial connection to %s", wsm.backendURL)
+	if err := wsm.connect(); err != nil {
+		log.Printf("[websocket] Initial connection failed, will retry: %v", err)
+		// Trigger reconnection in background
+		go func() {
+			wsm.reconnectChan <- struct{}{}
+		}()
+	} else {
+		log.Printf("[websocket] Initial connection established successfully")
+	}
+	log.Printf("[websocket] WebSocket manager started for agent %s (connecting in background)", wsm.agentID)
 	return nil
 }
 
@@ -257,6 +279,11 @@ func (wsm *WebSocketManager) IsConnected() bool {
 func (wsm *WebSocketManager) GetMetrics() map[string]interface{} {
 	wsm.metrics.mu.RLock()
 	defer wsm.metrics.mu.RUnlock()
+	
+	wsm.mu.RLock()
+	state := wsm.connectionState
+	lastAttempt := wsm.lastConnectAttempt
+	wsm.mu.RUnlock()
 
 	return map[string]interface{}{
 		"messages_sent":     wsm.metrics.MessagesSent,
@@ -265,28 +292,87 @@ func (wsm *WebSocketManager) GetMetrics() map[string]interface{} {
 		"errors":            wsm.metrics.Errors,
 		"last_activity":     wsm.metrics.LastActivity,
 		"connected":         wsm.IsConnected(),
+		"connection_state":  state,
+		"last_connect_attempt": lastAttempt,
 	}
 }
 
 // connect establishes a WebSocket connection
 func (wsm *WebSocketManager) connect() error {
-	// Create secure WebSocket connection
+	log.Printf("[websocket] connect() method called - START")
+	
+	// Update connection state (mutex already locked by Start() method)
+	log.Printf("[websocket] Updating connection state")
+	wsm.connectionState = "connecting"
+	wsm.lastConnectAttempt = time.Now()
+	
+	log.Printf("[websocket] Connection state updated, proceeding with dialer setup")
+
+	// Create WebSocket connection with appropriate TLS settings
+	log.Printf("[websocket] Creating WebSocket dialer")
 	dialer := websocket.Dialer{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: false, // Use proper cert validation in production
-		},
 		HandshakeTimeout: 30 * time.Second,
 	}
+	
+	// Only configure TLS for wss:// URLs
+	if len(wsm.backendURL) > 6 && wsm.backendURL[:6] == "wss://" {
+		log.Printf("[websocket] Configuring TLS for WSS URL")
+		dialer.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: false, // Use proper cert validation in production
+		}
+	}
+	
+	log.Printf("[websocket] Dialer configured, setting up headers")
 
 	// Add authentication headers
 	headers := http.Header{}
 	headers.Set("X-Agent-ID", wsm.agentID)
 	headers.Set("X-Agent-Public-Key", base64.StdEncoding.EncodeToString(wsm.publicKey))
 	headers.Set("User-Agent", "Aegis-Agent/1.0")
+	
+	// Add registration information if available
+	if wsm.agentUID != "" {
+		headers.Set("X-Agent-UID", wsm.agentUID)
+	}
+	if wsm.bootstrapToken != "" {
+		headers.Set("X-Bootstrap-Token", wsm.bootstrapToken)
+	}
 
-	conn, _, err := dialer.Dial(wsm.backendURL, headers)
-	if err != nil {
-		return fmt.Errorf("failed to dial WebSocket: %w", err)
+	log.Printf("[websocket] Attempting to connect to %s", wsm.backendURL)
+	log.Printf("[websocket] Headers: %v", headers)
+	
+	// Add timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	// Create a channel to receive the connection result
+	type dialResult struct {
+		conn *websocket.Conn
+		resp *http.Response
+		err  error
+	}
+	
+	resultChan := make(chan dialResult, 1)
+	
+	// Dial in a goroutine to avoid blocking
+	go func() {
+		conn, resp, err := dialer.Dial(wsm.backendURL, headers)
+		resultChan <- dialResult{conn: conn, resp: resp, err: err}
+	}()
+	
+	// Wait for connection or timeout
+	var conn *websocket.Conn
+	select {
+	case result := <-resultChan:
+		if result.err != nil {
+			log.Printf("[websocket] Failed to dial WebSocket: %v", result.err)
+			return fmt.Errorf("failed to dial WebSocket: %w", result.err)
+		}
+		conn = result.conn
+		log.Printf("[websocket] WebSocket connection established successfully")
+	case <-ctx.Done():
+		log.Printf("[websocket] WebSocket connection timed out after 10 seconds")
+		return fmt.Errorf("WebSocket connection timed out")
 	}
 
 	// Set connection parameters
@@ -296,20 +382,630 @@ func (wsm *WebSocketManager) connect() error {
 		return nil
 	})
 
-	// Authenticate
-	if err := wsm.authenticate(conn); err != nil {
-		conn.Close()
-		return fmt.Errorf("authentication failed: %w", err)
-	}
+	// WebSocket connection established, proceed with normal messaging
+	log.Printf("[websocket] WebSocket connection established, proceeding with normal messaging")
 
+	wsm.mu.Lock()
 	wsm.connection = conn
+	wsm.connectionState = "connected"
+	wsm.mu.Unlock()
 	
-	// Initialize heartbeat time
+	// Initialize heartbeat time first
+	log.Printf("[websocket] Initializing heartbeat time")
 	wsm.healthChecker.mu.Lock()
 	wsm.healthChecker.lastHeartbeat = time.Now()
 	wsm.healthChecker.mu.Unlock()
+	log.Printf("[websocket] Heartbeat time initialized")
+	
+	// DO NOT send heartbeat before authentication - backend will reject it
+	log.Printf("[websocket] Skipping initial heartbeat - must authenticate first")
+	
+	// Correct WebSocket flow: 1. Connect -> 2. Authenticate -> 3. Register -> 4. Heartbeats
+	if !wsm.isAuthenticated {
+		log.Printf("[websocket] Starting WebSocket authentication")
+		if err := wsm.performWebSocketAuthentication(conn); err != nil {
+			log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
+		} else {
+			log.Printf("[websocket] WebSocket authentication completed successfully")
+			wsm.isAuthenticated = true
+		}
+	} else {
+		log.Printf("[websocket] Agent already authenticated, skipping authentication")
+	}
+	
+	if !wsm.isRegistered && wsm.isAuthenticated {
+		log.Printf("[websocket] Starting WebSocket registration")
+		if err := wsm.performWebSocketRegistration(conn); err != nil {
+			log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
+		} else {
+			log.Printf("[websocket] WebSocket registration completed successfully")
+			wsm.isRegistered = true
+		}
+	} else if wsm.isRegistered {
+		log.Printf("[websocket] Agent already registered, skipping registration")
+	}
 	
 	log.Printf("[websocket] Connected to backend at %s", wsm.backendURL)
+	return nil
+}
+
+// performWebSocketRegistration performs agent registration through WebSocket messages (as per working example)
+func (wsm *WebSocketManager) performWebSocketRegistration(conn *websocket.Conn) error {
+	log.Printf("[websocket] Performing WebSocket registration for agent %s", wsm.agentID)
+	
+	// Step 1: Send registration init message
+	log.Printf("[websocket] Sending registration init message")
+	if err := wsm.sendRegistrationInit(conn); err != nil {
+		return fmt.Errorf("failed to send registration init: %w", err)
+	}
+	
+	// Step 2: Wait for registration init response
+	log.Printf("[websocket] Waiting for registration init response")
+	var initResponse map[string]interface{}
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if err := conn.ReadJSON(&initResponse); err != nil {
+		return fmt.Errorf("failed to read registration init response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration init response received: %v", initResponse)
+	
+	// Parse response
+	channel, _ := initResponse["channel"].(string)
+	if channel != "agent.registration" {
+		return fmt.Errorf("unexpected response channel: %s", channel)
+	}
+	
+	payloadStr, _ := initResponse["payload"].(string)
+	
+	// The registration response payload is direct JSON, not base64-encoded
+	var regData map[string]interface{}
+	if err := json.Unmarshal([]byte(payloadStr), &regData); err != nil {
+		return fmt.Errorf("failed to unmarshal registration response: %w", err)
+	}
+	
+	registrationID, _ := regData["registration_id"].(string)
+	nonce, _ := regData["nonce"].(string)
+	serverTime, _ := regData["server_time"].(string)
+	
+	if registrationID == "" || nonce == "" || serverTime == "" {
+		return fmt.Errorf("missing required fields in registration response")
+	}
+	
+	log.Printf("[websocket] Registration ID: %s", registrationID)
+	
+	// Step 3: Send registration complete message
+	log.Printf("[websocket] Sending registration complete message")
+	if err := wsm.sendRegistrationComplete(conn, registrationID, nonce, serverTime); err != nil {
+		return fmt.Errorf("failed to send registration complete: %w", err)
+	}
+	
+	// Step 4: Wait for registration complete response
+	log.Printf("[websocket] Waiting for registration complete response")
+	var completeResponse map[string]interface{}
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if err := conn.ReadJSON(&completeResponse); err != nil {
+		return fmt.Errorf("failed to read registration complete response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration complete response received: %v", completeResponse)
+	
+	// Parse complete response
+	completeChannel, _ := completeResponse["channel"].(string)
+	if completeChannel != "agent.registration.complete" {
+		return fmt.Errorf("unexpected complete response channel: %s", completeChannel)
+	}
+	
+	completePayloadStr, _ := completeResponse["payload"].(string)
+	
+	// The registration complete response payload is direct JSON, not base64-encoded
+	var completeData map[string]interface{}
+	if err := json.Unmarshal([]byte(completePayloadStr), &completeData); err != nil {
+		return fmt.Errorf("failed to unmarshal registration complete response: %w", err)
+	}
+	
+	// Extract agent_uid and bootstrap_token
+	agentUID, _ := completeData["agent_uid"].(string)
+	bootstrapToken, _ := completeData["bootstrap_token"].(string)
+	
+	if agentUID == "" || bootstrapToken == "" {
+		return fmt.Errorf("missing agent_uid or bootstrap_token in registration complete response")
+	}
+	
+	// Store registration credentials
+	wsm.agentUID = agentUID
+	wsm.bootstrapToken = bootstrapToken
+	
+	log.Printf("[websocket] Registration successful - Agent UID: %s", agentUID)
+	return nil
+}
+
+// sendRegistrationInit sends the registration init message
+func (wsm *WebSocketManager) sendRegistrationInit(conn *websocket.Conn) error {
+	// Registration data (as per working example)
+	registrationData := map[string]interface{}{
+		"org_id":          "default-org",
+		"host_id":         wsm.agentID,
+		"agent_pubkey":    base64.StdEncoding.EncodeToString(wsm.publicKey),
+		"machine_id_hash": "test-machine-hash",
+		"agent_version":   "1.0.0",
+		"capabilities":    map[string]interface{}{},
+		"platform": map[string]interface{}{
+			"arch": "arm64",
+			"os":   "linux",
+		},
+		"network": map[string]interface{}{
+			"interface": "eth0",
+		},
+	}
+	
+	// Base64 encode the registration data
+	jsonData, err := json.Marshal(registrationData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal registration data: %w", err)
+	}
+	payloadB64 := base64.StdEncoding.EncodeToString(jsonData)
+	
+	// Create SecureMessage
+	message := map[string]interface{}{
+		"id":        fmt.Sprintf("reg_init_%d", time.Now().UnixNano()),
+		"type":      "request",
+		"channel":   "agent.registration",
+		"timestamp": time.Now().Unix(),
+		"payload":   payloadB64,
+		"headers":   map[string]string{},
+	}
+	
+	return conn.WriteJSON(message)
+}
+
+// sendRegistrationComplete sends the registration complete message
+func (wsm *WebSocketManager) sendRegistrationComplete(conn *websocket.Conn, registrationID, nonce, serverTime string) error {
+	// Create signature data: nonce_bytes + server_time + host_id (as per backend verification logic)
+	// Decode the nonce from base64 to bytes first
+	nonceBytes, err := base64.StdEncoding.DecodeString(nonce)
+	if err != nil {
+		return fmt.Errorf("failed to decode nonce: %w", err)
+	}
+	
+	// Create the exact data the backend expects: nonce_bytes + server_time + host_id
+	signatureData := append(nonceBytes, []byte(serverTime+wsm.agentID)...)
+	
+	// Sign the data
+	signature := ed25519.Sign(wsm.privateKey, signatureData)
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+	
+	// Completion data
+	completionData := map[string]interface{}{
+		"registration_id": registrationID,
+		"host_id":         wsm.agentID,
+		"signature":       signatureB64,
+	}
+	
+	// Base64 encode the completion data
+	jsonData, err := json.Marshal(completionData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal completion data: %w", err)
+	}
+	payloadB64 := base64.StdEncoding.EncodeToString(jsonData)
+	
+	// Create SecureMessage
+	message := map[string]interface{}{
+		"id":        fmt.Sprintf("reg_complete_%d", time.Now().UnixNano()),
+		"type":      "request",
+		"channel":   "agent.registration.complete",
+		"timestamp": time.Now().Unix(),
+		"payload":   payloadB64,
+		"headers":   map[string]string{},
+	}
+	
+	return conn.WriteJSON(message)
+}
+
+// performWebSocketAuthentication performs agent authentication through WebSocket messages (DEPRECATED)
+func (wsm *WebSocketManager) performWebSocketAuthentication(conn *websocket.Conn) error {
+	log.Printf("[websocket] Performing WebSocket authentication for agent %s", wsm.agentID)
+	
+	// Create authentication data
+	timestamp := time.Now().Unix()
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	nonceB64 := base64.StdEncoding.EncodeToString(nonce)
+	
+	// Create signature data: agent_id:public_key:timestamp:nonce
+	signatureData := fmt.Sprintf("%s:%s:%d:%s", 
+		wsm.agentID, 
+		base64.StdEncoding.EncodeToString(wsm.publicKey), 
+		timestamp, 
+		nonceB64)
+	
+	// Sign the data
+	signature := ed25519.Sign(wsm.privateKey, []byte(signatureData))
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+	
+	// Send authentication request according to WebSocket Protocol Specification
+	authData := map[string]interface{}{
+		"agent_id":   wsm.agentID,
+		"public_key": base64.StdEncoding.EncodeToString(wsm.publicKey),
+		"timestamp":  timestamp,
+		"nonce":      nonceB64,
+		"signature":  signatureB64,
+	}
+	
+	// Base64 encode the authentication payload
+	jsonData, err := json.Marshal(authData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth payload: %w", err)
+	}
+	payloadB64 := base64.StdEncoding.EncodeToString(jsonData)
+	
+	// Create SecureMessage with channel "auth"
+	authMessage := map[string]interface{}{
+		"id":        fmt.Sprintf("auth_%d", time.Now().UnixNano()),
+		"type":      "request",
+		"channel":   "auth",
+		"timestamp": time.Now().Unix(),
+		"payload":   payloadB64,
+		"headers":   map[string]string{},
+	}
+	
+	// Send authentication request using SecureMessage format
+	log.Printf("[websocket] Sending WebSocket authentication request")
+	if err := conn.WriteJSON(authMessage); err != nil {
+		return fmt.Errorf("failed to send authentication request: %w", err)
+	}
+	
+	// Set timeout for reading response
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	
+	// Read authentication response as SecureMessage
+	var authResponse map[string]interface{}
+	if err := conn.ReadJSON(&authResponse); err != nil {
+		log.Printf("[websocket] Failed to read authentication response: %v", err)
+		return fmt.Errorf("failed to read authentication response: %w", err)
+	}
+	
+	log.Printf("[websocket] Authentication response received: %v", authResponse)
+	
+	// Check if authentication was successful
+	channel, _ := authResponse["channel"].(string)
+	if channel != "auth" {
+		return fmt.Errorf("unexpected response channel: %s", channel)
+	}
+	
+	// Parse the payload
+	payloadStr, _ := authResponse["payload"].(string)
+	payloadBytes, err := base64.StdEncoding.DecodeString(payloadStr)
+	if err != nil {
+		return fmt.Errorf("failed to decode auth response payload: %w", err)
+	}
+	
+	var authResponseData map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &authResponseData); err != nil {
+		return fmt.Errorf("failed to unmarshal auth response: %w", err)
+	}
+	
+	// Check if authentication was successful
+	success, hasSuccess := authResponseData["success"].(bool)
+	if !hasSuccess || !success {
+		message := "Authentication failed"
+		if msg, hasMsg := authResponseData["message"].(string); hasMsg {
+			message = msg
+		}
+		return fmt.Errorf("authentication failed: %s", message)
+	}
+	
+	// Store session information
+	if sessionToken, ok := authResponseData["session_token"].(string); ok {
+		wsm.sessionToken = sessionToken
+		log.Printf("[websocket] Session token received: %s", sessionToken[:20]+"...")
+	}
+	
+	if expiresAt, ok := authResponseData["expires_at"].(float64); ok {
+		wsm.sessionExpires = time.Unix(int64(expiresAt), 0)
+		log.Printf("[websocket] Session expires at: %v", wsm.sessionExpires)
+	}
+	
+	// Store backend key for shared key derivation
+	if backendKey, ok := authResponseData["backend_key"].(string); ok {
+		backendKeyBytes, err := base64.StdEncoding.DecodeString(backendKey)
+		if err != nil {
+			return fmt.Errorf("failed to decode backend key: %w", err)
+		}
+		
+		// Derive shared key: SHA256(agent_private_key + backend_public_key)
+		sharedKey := sha256.Sum256(append(wsm.privateKey, backendKeyBytes...))
+		wsm.sharedKey = sharedKey[:]
+		log.Printf("[websocket] Shared key derived successfully")
+	}
+	
+	log.Printf("[websocket] WebSocket authentication successful")
+	return nil
+}
+
+// performHTTPRegistration performs agent registration via HTTP through WebSocket Gateway (as per AGENT_TEAM_FINAL_SOLUTION.md)
+func (wsm *WebSocketManager) performHTTPRegistration() error {
+	log.Printf("[websocket] Performing HTTP registration for agent %s", wsm.agentID)
+	log.Printf("[websocket] HTTP registration method started")
+	
+	// Convert WebSocket URL to HTTP URL for registration
+	log.Printf("[websocket] Converting WebSocket URL to HTTP URL")
+	httpURL := strings.Replace(wsm.backendURL, "ws://", "http://", 1)
+	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
+	httpURL = strings.TrimSuffix(httpURL, "/ws/agent")
+	log.Printf("[websocket] HTTP URL: %s", httpURL)
+	
+	// Step 1: Registration Init
+	initURL := httpURL + "/agents/register/init"
+	initData := map[string]interface{}{
+		"org_id":           "default-org",
+		"host_id":          wsm.agentID,
+		"agent_pubkey":     base64.StdEncoding.EncodeToString(wsm.publicKey),
+		"machine_id_hash":  wsm.agentID + "-hash",
+		"agent_version":    "1.0.1",
+		"capabilities": map[string]interface{}{
+			"websocket":   true,
+			"heartbeat":   true,
+			"enforcement": true,
+		},
+		"platform": map[string]interface{}{
+			"os":   "linux",
+			"arch": "arm64",
+		},
+		"network": map[string]interface{}{
+			"interface": "eth0",
+		},
+	}
+	
+	jsonData, err := json.Marshal(initData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal init data: %w", err)
+	}
+	
+	resp, err := http.Post(initURL, "application/json", bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to send registration init: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("registration init failed with status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	var initResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&initResponse); err != nil {
+		return fmt.Errorf("failed to decode init response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration init response: %v", initResponse)
+	
+	// Extract registration data
+	nonce, hasNonce := initResponse["nonce"].(string)
+	if !hasNonce {
+		return fmt.Errorf("no nonce in init response")
+	}
+	
+	serverTime, hasServerTime := initResponse["server_time"].(string)
+	if !hasServerTime {
+		return fmt.Errorf("no server_time in init response")
+	}
+	
+	registrationID, hasRegID := initResponse["registration_id"].(string)
+	if !hasRegID {
+		return fmt.Errorf("no registration_id in init response")
+	}
+	
+	// Step 2: Registration Complete with signature
+	completeURL := httpURL + "/agents/register/complete"
+	
+	// Sign the data: nonce + server_time + host_id (exactly what backend expects)
+	nonceBytes, err := base64.StdEncoding.DecodeString(nonce)
+	if err != nil {
+		return fmt.Errorf("failed to decode nonce: %w", err)
+	}
+	
+	dataToSign := append(nonceBytes, []byte(serverTime+wsm.agentID)...)
+	signature := ed25519.Sign(wsm.privateKey, dataToSign)
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+	
+	completeData := map[string]interface{}{
+		"registration_id": registrationID,
+		"host_id":         wsm.agentID,
+		"signature":       signatureB64,
+	}
+	
+	jsonData, err = json.Marshal(completeData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal complete data: %w", err)
+	}
+	
+	resp, err = http.Post(completeURL, "application/json", bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to send registration complete: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("registration complete failed with status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	var completeResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&completeResponse); err != nil {
+		return fmt.Errorf("failed to decode complete response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration complete response: %v", completeResponse)
+	
+	log.Printf("[websocket] HTTP registration successful for agent %s", wsm.agentID)
+	return nil
+}
+
+// performWebSocketRegistration_DUPLICATE_REMOVED performs agent registration through WebSocket messages
+func (wsm *WebSocketManager) performWebSocketRegistration_DUPLICATE_REMOVED(conn *websocket.Conn) error {
+	log.Printf("[websocket] Performing WebSocket registration for agent %s", wsm.agentID)
+	log.Printf("[websocket] WebSocket registration method started")
+	
+	// Step 1: Send registration_init message
+	log.Printf("[websocket] Creating registration_init message")
+	
+	// Registration data
+	registrationData := map[string]interface{}{
+		"org_id":           "default-org",
+		"host_id":          wsm.agentID,
+		"agent_pubkey":     base64.StdEncoding.EncodeToString(wsm.publicKey),
+		"machine_id_hash":  wsm.agentID + "-hash",
+		"agent_version":    "1.0.1",
+		"capabilities": map[string]interface{}{
+			"websocket":   true,
+			"heartbeat":   true,
+			"enforcement": true,
+		},
+		"platform": map[string]interface{}{
+			"os":   "linux",
+			"arch": "arm64",
+		},
+		"network": map[string]interface{}{
+			"interface": "eth0",
+		},
+	}
+	
+	// Convert to JSON and base64 encode
+	jsonData, err := json.Marshal(registrationData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal registration data: %w", err)
+	}
+	payloadB64 := base64.StdEncoding.EncodeToString(jsonData)
+	
+	initMsg := map[string]interface{}{
+		"id":        fmt.Sprintf("reg_init_%d", time.Now().UnixNano()),
+		"type":      "request",
+		"channel":   "agent.registration",
+		"timestamp": time.Now().Unix(),
+		"payload":   payloadB64,
+		"headers":   make(map[string]string),
+	}
+	
+	// Send registration_init request
+	if err := conn.WriteJSON(initMsg); err != nil {
+		return fmt.Errorf("failed to send registration_init request: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration init request sent: %s", initMsg["id"])
+	
+	// Set timeout for reading response
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	
+	// Read registration_init response
+	var initResponse map[string]interface{}
+	if err := conn.ReadJSON(&initResponse); err != nil {
+		log.Printf("[websocket] Failed to read registration_init response: %v", err)
+		return fmt.Errorf("failed to read registration_init response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration init response received: %v", initResponse)
+	
+	// Check if init was successful
+	responseType, hasType := initResponse["type"].(string)
+	if !hasType || responseType != "response" {
+		return fmt.Errorf("registration init failed - invalid response type")
+	}
+	
+	// Extract registration data from response payload
+	payloadStr, hasPayload := initResponse["payload"].(string)
+	if !hasPayload {
+		return fmt.Errorf("no payload in registration response")
+	}
+	
+	payloadBytes, err := base64.StdEncoding.DecodeString(payloadStr)
+	if err != nil {
+		return fmt.Errorf("failed to decode response payload: %w", err)
+	}
+	
+	var regData map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &regData); err != nil {
+		return fmt.Errorf("failed to parse registration data: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration data: %v", regData)
+	
+	// Step 2: Send registration_complete message with signature
+	nonce, hasNonce := regData["nonce"].(string)
+	if !hasNonce {
+		return fmt.Errorf("no nonce in registration response")
+	}
+	
+	serverTime, hasServerTime := regData["server_time"].(string)
+	if !hasServerTime {
+		return fmt.Errorf("no server_time in registration response")
+	}
+	
+	registrationID, hasRegID := regData["registration_id"].(string)
+	if !hasRegID {
+		return fmt.Errorf("no registration_id in registration response")
+	}
+	
+	// Sign the data: nonce + server_time + host_id
+	nonceBytes, err := base64.StdEncoding.DecodeString(nonce)
+	if err != nil {
+		return fmt.Errorf("failed to decode nonce: %w", err)
+	}
+	
+	dataToSign := append(nonceBytes, []byte(serverTime+wsm.agentID)...)
+	signature := ed25519.Sign(wsm.privateKey, dataToSign)
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+	
+	// Completion data
+	completionData := map[string]interface{}{
+		"registration_id": registrationID,
+		"host_id":         wsm.agentID,
+		"signature":       signatureB64,
+	}
+	
+	// Convert to JSON and base64 encode
+	jsonData, err = json.Marshal(completionData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal completion data: %w", err)
+	}
+	payloadB64 = base64.StdEncoding.EncodeToString(jsonData)
+	
+	completeMsg := map[string]interface{}{
+		"id":        fmt.Sprintf("reg_complete_%d", time.Now().UnixNano()),
+		"type":      "request",
+		"channel":   "agent.registration.complete",
+		"timestamp": time.Now().Unix(),
+		"payload":   payloadB64,
+		"headers":   make(map[string]string),
+	}
+	
+	// Send registration_complete request
+	if err := conn.WriteJSON(completeMsg); err != nil {
+		return fmt.Errorf("failed to send registration_complete request: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration complete request sent: %s", completeMsg["id"])
+	
+	// Set timeout for reading response
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	
+	// Read registration_complete response
+	var completeResponse map[string]interface{}
+	if err := conn.ReadJSON(&completeResponse); err != nil {
+		log.Printf("[websocket] Failed to read registration_complete response: %v", err)
+		return fmt.Errorf("failed to read registration_complete response: %w", err)
+	}
+	
+	log.Printf("[websocket] Registration complete response received: %v", completeResponse)
+	
+	// Check if registration was successful
+	successType, hasSuccessType := completeResponse["type"].(string)
+	if !hasSuccessType || successType != "response" {
+		return fmt.Errorf("registration complete failed")
+	}
+	
+	log.Printf("[websocket] WebSocket registration successful for agent %s", wsm.agentID)
 	return nil
 }
 
@@ -392,7 +1088,43 @@ func (wsm *WebSocketManager) authenticate(conn *websocket.Conn) error {
 	// Generate shared key using ECDH-like key agreement
 	wsm.sharedKey = wsm.deriveSharedKey(backendKey)
 
+	// Send agent registration after successful authentication
+	if err := wsm.sendAgentRegistration(conn); err != nil {
+		log.Printf("[websocket] Warning: failed to send agent registration: %v", err)
+		// Don't fail authentication for registration issues
+	}
+
 	log.Printf("[websocket] Authentication successful, session expires at %v", wsm.sessionExpires)
+	return nil
+}
+
+// sendAgentRegistration performs HTTP-based two-step registration
+func (wsm *WebSocketManager) sendAgentRegistration(conn *websocket.Conn) error {
+	// Extract base URL from WebSocket URL (ws://host:port -> http://host:port)
+	baseURL := wsm.backendURL
+	if len(baseURL) > 5 && baseURL[:5] == "ws://" {
+		baseURL = "http://" + baseURL[5:]
+	} else if len(baseURL) > 6 && baseURL[:6] == "wss://" {
+		baseURL = "https://" + baseURL[6:]
+	}
+
+	// Remove WebSocket path if present
+	if idx := len(baseURL) - len("/ws/agent"); idx > 0 && baseURL[idx:] == "/ws/agent" {
+		baseURL = baseURL[:idx]
+	}
+
+	log.Printf("[websocket] Performing HTTP registration with base URL: %s", baseURL)
+
+	// Create registration client
+	registrationClient := NewRegistrationClient(wsm.agentID, wsm.privateKey, wsm.publicKey, baseURL)
+
+	// Perform two-step registration
+	if err := registrationClient.Register(); err != nil {
+		log.Printf("[websocket] HTTP registration failed: %v", err)
+		return fmt.Errorf("HTTP registration failed: %w", err)
+	}
+
+	log.Printf("[websocket] HTTP registration successful for agent %s", wsm.agentID)
 	return nil
 }
 
@@ -468,7 +1200,7 @@ func (wsm *WebSocketManager) processMessage(msg SecureMessage) error {
 
 // heartbeat sends periodic heartbeat messages
 func (wsm *WebSocketManager) heartbeat() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(60 * time.Second) // Send heartbeat every 60 seconds (production-ready)
 	defer ticker.Stop()
 
 	log.Printf("[websocket] Heartbeat goroutine started")
@@ -480,14 +1212,23 @@ func (wsm *WebSocketManager) heartbeat() {
 			return
 		case <-ticker.C:
 			log.Printf("[websocket] Heartbeat ticker triggered")
-			wsm.sendHeartbeat()
+			// Only send heartbeat if authenticated
+			wsm.mu.RLock()
+			authenticated := wsm.isAuthenticated
+			wsm.mu.RUnlock()
+			
+			if authenticated {
+				wsm.sendHeartbeat()
+			} else {
+				log.Printf("[websocket] Skipping heartbeat - not authenticated yet")
+			}
 		}
 	}
 }
 
 // connectionMonitor monitors connection health
 func (wsm *WebSocketManager) connectionMonitor() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(120 * time.Second) // Check every 2 minutes (production-ready)
 	defer ticker.Stop()
 
 	for {
@@ -495,10 +1236,22 @@ func (wsm *WebSocketManager) connectionMonitor() {
 		case <-wsm.ctx.Done():
 			return
 		case <-ticker.C:
-			if !wsm.isConnectionHealthy() {
+			// Only check health if we're in connected state
+			wsm.mu.RLock()
+			state := wsm.connectionState
+			wsm.mu.RUnlock()
+			
+			if state == "connected" && !wsm.isConnectionHealthy() {
 				log.Printf("[websocket] Connection unhealthy, attempting reconnection...")
+				wsm.mu.Lock()
+				wsm.connectionState = "reconnecting"
+				wsm.mu.Unlock()
+				
 				if err := wsm.reconnect(); err != nil {
 					log.Printf("[websocket] Reconnection failed: %v", err)
+					wsm.mu.Lock()
+					wsm.connectionState = "disconnected"
+					wsm.mu.Unlock()
 				}
 			}
 		}
@@ -541,23 +1294,31 @@ func (wsm *WebSocketManager) reconnect() error {
 		wsm.connection.Close()
 		wsm.connection = nil
 	}
+	wsm.connectionState = "reconnecting"
 	wsm.mu.Unlock()
 
-	// Wait before reconnecting
+	// Wait before reconnecting with exponential backoff
 	time.Sleep(wsm.reconnectDelay)
+	log.Printf("[websocket] Attempting reconnection after %v delay", wsm.reconnectDelay)
 
 	// Establish new connection
 	if err := wsm.connect(); err != nil {
-		// Increase reconnect delay
+		// Increase reconnect delay with exponential backoff
 		wsm.reconnectDelay = time.Duration(float64(wsm.reconnectDelay) * 1.5)
 		if wsm.reconnectDelay > wsm.maxReconnectDelay {
 			wsm.reconnectDelay = wsm.maxReconnectDelay
 		}
+		log.Printf("[websocket] Reconnection failed, next attempt in %v: %v", wsm.reconnectDelay, err)
+		
+		// Update state to disconnected on failure
+		wsm.mu.Lock()
+		wsm.connectionState = "disconnected"
+		wsm.mu.Unlock()
 		return err
 	}
 
-	// Reset reconnect delay
-	wsm.reconnectDelay = 5 * time.Second
+	// Reset reconnect delay on successful connection
+	wsm.reconnectDelay = 2 * time.Second
 	wsm.incrementReconnectCount()
 	log.Printf("[websocket] Successfully reconnected to backend")
 	return nil

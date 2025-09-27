@@ -107,7 +107,7 @@ func getAgentVersion() string {
 	if version := os.Getenv("AGENT_VERSION"); version != "" {
 		return version
 	}
-	return "1.0.0"
+	return "1.0.1"
 }
 
 // getCapabilities returns detected system capabilities

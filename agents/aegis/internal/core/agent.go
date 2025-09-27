@@ -258,6 +258,7 @@ func (a *Agent) initializeAllModules() error {
 		settings := make(map[string]interface{})
 		if moduleType == "websocket_communication" {
 			settings["backend_url"] = a.config.BackendURL
+			settings["agent_id"] = a.agentID
 		}
 		
 		module, err := a.moduleFactory.CreateModule(moduleType, modules.ModuleConfig{
