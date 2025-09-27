@@ -400,29 +400,28 @@ func (wsm *WebSocketManager) connect() error {
 	// DO NOT send heartbeat before authentication - backend will reject it
 	log.Printf("[websocket] Skipping initial heartbeat - must authenticate first")
 	
+	// Reset authentication state on new connection - each connection needs fresh authentication
+	wsm.isAuthenticated = false
+	wsm.isRegistered = false
+	log.Printf("[websocket] Reset authentication state for new connection")
+	
 	// Correct WebSocket flow: 1. Connect -> 2. Authenticate -> 3. Register -> 4. Heartbeats
-	if !wsm.isAuthenticated {
-		log.Printf("[websocket] Starting WebSocket authentication")
-		if err := wsm.performWebSocketAuthentication(conn); err != nil {
-			log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
-		} else {
-			log.Printf("[websocket] WebSocket authentication completed successfully")
-			wsm.isAuthenticated = true
-		}
+	log.Printf("[websocket] Starting WebSocket authentication")
+	if err := wsm.performWebSocketAuthentication(conn); err != nil {
+		log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
+		return fmt.Errorf("authentication failed: %w", err)
 	} else {
-		log.Printf("[websocket] Agent already authenticated, skipping authentication")
+		log.Printf("[websocket] WebSocket authentication completed successfully")
+		wsm.isAuthenticated = true
 	}
 	
-	if !wsm.isRegistered && wsm.isAuthenticated {
-		log.Printf("[websocket] Starting WebSocket registration")
-		if err := wsm.performWebSocketRegistration(conn); err != nil {
-			log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
-		} else {
-			log.Printf("[websocket] WebSocket registration completed successfully")
-			wsm.isRegistered = true
-		}
-	} else if wsm.isRegistered {
-		log.Printf("[websocket] Agent already registered, skipping registration")
+	log.Printf("[websocket] Starting WebSocket registration")
+	if err := wsm.performWebSocketRegistration(conn); err != nil {
+		log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
+		return fmt.Errorf("registration failed: %w", err)
+	} else {
+		log.Printf("[websocket] WebSocket registration completed successfully")
+		wsm.isRegistered = true
 	}
 	
 	log.Printf("[websocket] Connected to backend at %s", wsm.backendURL)
