@@ -6,14 +6,11 @@ This directory contains all documentation for the Aegis Agent project, organized
 
 ### 🔍 [analysis/](./analysis/)
 Root cause analysis and technical deep-dives:
-- `analyze_authentication_issue.md` - Analysis of why agent wasn't authenticating
-- `signature_verification_analysis.md` - Detailed signature verification fix
+- `COMPREHENSIVE_TECHNICAL_ANALYSIS.md` - **CONSOLIDATED** - All technical analysis, authentication issues, signature verification, performance analysis, and backend storage issues
 
 ### 📖 [guides/](./guides/)
 Comprehensive guides and how-to documentation:
-- `AGENT_TEAM_CONNECTION_GUIDE.md` - Complete WebSocket connection guide
-- `AGENT_TROUBLESHOOTING_GUIDE.md` - Common issues and solutions
-- `PRODUCTION_READINESS_CHECKLIST.md` - Production deployment checklist
+- `COMPREHENSIVE_AGENT_GUIDE.md` - **CONSOLIDATED** - Complete connection guide, troubleshooting, and production readiness checklist
 
 ### 🧪 [testing/](./testing/)
 Testing scripts and tools:
@@ -25,14 +22,11 @@ Testing scripts and tools:
 
 ### 🚀 [deployment/](./deployment/)
 Deployment scripts and guides:
-- `cleanup_linux.sh` - Linux host cleanup script
+- `COMPREHENSIVE_DEPLOYMENT_GUIDE.md` - **CONSOLIDATED** - All deployment guides, checklists, and deployment procedures
 
 ### 📋 [api/](./api/)
 Backend API documentation:
-- `BACKEND_QUICK_REFERENCE.md` - Quick API reference
-- `BACKEND_TEAM_HANDOFF.md` - Backend team handoff documentation
-- `BACKEND_TEST_AGENT.md` - Backend agent testing guide
-- `WEBSOCKET_PROTOCOL_SPECIFICATION.md` - WebSocket protocol details
+- `COMPREHENSIVE_API_REFERENCE.md` - **CONSOLIDATED** - All API documentation, WebSocket protocol, backend testing, and team handoff information
 
 ### 🏗️ [architecture/](./architecture/)
 System architecture documentation:
@@ -47,26 +41,22 @@ Communication protocol documentation:
 
 ### 📊 [summaries/](./summaries/)
 Project summaries and cleanup reports:
-- `BINARY_CLEANUP_SUMMARY.md` - Binary cleanup summary
-- `CLEANUP_COMPLETE.md` - Complete cleanup report
-- `DOCUMENTATION_UPDATE_SUMMARY.md` - Documentation updates
-- `HEARTBEAT_FIX_SUMMARY.md` - Heartbeat fix summary
-- `PROJECT_CLEANUP_SUMMARY.md` - Overall project cleanup
+- `COMPREHENSIVE_PROJECT_SUMMARY.md` - **CONSOLIDATED** - All project summaries, cleanup reports, and status updates
 
 ## 🎯 Quick Start
 
 ### For Developers
-1. Start with [AGENT_TEAM_CONNECTION_GUIDE.md](./guides/AGENT_TEAM_CONNECTION_GUIDE.md)
-2. Review [analysis/](./analysis/) for technical details
+1. Start with [COMPREHENSIVE_AGENT_GUIDE.md](./guides/COMPREHENSIVE_AGENT_GUIDE.md)
+2. Review [COMPREHENSIVE_TECHNICAL_ANALYSIS.md](./analysis/COMPREHENSIVE_TECHNICAL_ANALYSIS.md) for technical details
 3. Use [testing/](./testing/) scripts for validation
 
 ### For Operations
-1. Check [PRODUCTION_READINESS_CHECKLIST.md](./guides/PRODUCTION_READINESS_CHECKLIST.md)
-2. Use [deployment/](./deployment/) scripts
-3. Reference [troubleshooting guide](./guides/AGENT_TROUBLESHOOTING_GUIDE.md)
+1. Check [COMPREHENSIVE_AGENT_GUIDE.md](./guides/COMPREHENSIVE_AGENT_GUIDE.md) for production readiness
+2. Use [COMPREHENSIVE_DEPLOYMENT_GUIDE.md](./deployment/COMPREHENSIVE_DEPLOYMENT_GUIDE.md) for deployment
+3. Reference troubleshooting sections in the comprehensive guides
 
 ### For Backend Integration
-1. Review [WEBSOCKET_PROTOCOL_SPECIFICATION.md](./api/WEBSOCKET_PROTOCOL_SPECIFICATION.md)
+1. Review [COMPREHENSIVE_API_REFERENCE.md](./api/COMPREHENSIVE_API_REFERENCE.md)
 2. Check [SECURE_AGENT_BACKEND_COMMUNICATION.md](./communication/SECURE_AGENT_BACKEND_COMMUNICATION.md)
 3. Use [AGENT_CONNECTION_TEST.py](./testing/AGENT_CONNECTION_TEST.py) for testing
 
