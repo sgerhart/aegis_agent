@@ -36,6 +36,7 @@ type WebSocketManager struct {
 	bootstrapToken    string
 	isRegistered      bool
 	isAuthenticated   bool
+	isReconnecting    bool  // Flag to prevent reconnection loops
 	connection        *websocket.Conn
 	reconnectDelay    time.Duration
 	maxReconnectDelay time.Duration
@@ -1287,6 +1288,16 @@ func (wsm *WebSocketManager) processQueuedMessage(msg QueuedMessage) error {
 
 // reconnect establishes a new connection
 func (wsm *WebSocketManager) reconnect() error {
+	// Prevent reconnection loops
+	wsm.mu.Lock()
+	if wsm.isReconnecting {
+		wsm.mu.Unlock()
+		log.Printf("[websocket] Already reconnecting, skipping duplicate reconnection attempt")
+		return nil
+	}
+	wsm.isReconnecting = true
+	wsm.mu.Unlock()
+	
 	// Close existing connection
 	wsm.mu.Lock()
 	if wsm.connection != nil {
@@ -1319,6 +1330,12 @@ func (wsm *WebSocketManager) reconnect() error {
 	// Reset reconnect delay on successful connection
 	wsm.reconnectDelay = 2 * time.Second
 	wsm.incrementReconnectCount()
+	
+	// Reset reconnecting flag
+	wsm.mu.Lock()
+	wsm.isReconnecting = false
+	wsm.mu.Unlock()
+	
 	log.Printf("[websocket] Successfully reconnected to backend")
 	return nil
 }
@@ -1588,8 +1605,8 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 	heartbeatMsg := SecureMessage{
 		ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
 		Type:      MessageTypeHeartbeat,
-		Channel:   fmt.Sprintf("agent.%s.heartbeat", wsm.agentID),
-		Payload:   base64.StdEncoding.EncodeToString([]byte(`{"status":"alive","timestamp":` + fmt.Sprintf("%d", time.Now().Unix()) + `}`)),
+		Channel:   "heartbeat",
+		Payload:   base64.StdEncoding.EncodeToString([]byte("{}")),
 		Timestamp: time.Now().Unix(),
 		Nonce:     base64.StdEncoding.EncodeToString([]byte("heartbeat_nonce")),
 		Signature: "",
@@ -1607,7 +1624,7 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 	if err != nil {
 		log.Printf("[websocket] Failed to send heartbeat: %v", err)
 		wsm.incrementErrorCount()
-		wsm.triggerGracefulReconnection()
+		// Don't trigger reconnection on heartbeat failure - let the connection health check handle it
 		return
 	}
 
