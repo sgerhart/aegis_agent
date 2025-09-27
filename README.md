@@ -62,6 +62,8 @@ python3 test_module_control.py
 - **[🔌 WebSocket Protocol Specification](docs/engineers/WEBSOCKET_PROTOCOL_SPECIFICATION.md)** - Complete communication protocol
 - **[📝 Agent Registration Implementation](docs/engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)** - Registration flow and code examples
 - **[🏗️ System Architecture](docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md)** - Detailed architecture documentation
+- **[📊 Architecture Diagrams](docs/architecture/AGENT_ARCHITECTURE_DIAGRAM.md)** - Visual architecture and module specifications
+- **[🔌 Module Connectivity](docs/architecture/MODULE_CONNECTIVITY_SPECIFICATION.md)** - Backend service connectivity matrix
 
 ## 🔧 **Build Targets**
 

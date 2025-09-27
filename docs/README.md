@@ -14,6 +14,8 @@ Welcome to the Aegis Agent documentation! This directory contains comprehensive 
 - **[Agent Registration Implementation](engineers/AGENT_REGISTRATION_IMPLEMENTATION.md)** - Registration flow and code examples
 - **[Backend Team Handoff](engineers/BACKEND_TEAM_HANDOFF.md)** - Backend integration details
 - **[Agent Working Example](engineers/AGENT_WORKING_EXAMPLE.md)** - Complete working code examples
+- **[📊 Architecture Diagrams](architecture/AGENT_ARCHITECTURE_DIAGRAM.md)** - Visual architecture and module specifications
+- **[🔌 Module Connectivity](architecture/MODULE_CONNECTIVITY_SPECIFICATION.md)** - Backend service connectivity matrix
 
 ## 📖 Documentation Structure
 
@@ -33,7 +35,9 @@ docs/
 ├── api/                      # API references
 │   └── COMPREHENSIVE_API_REFERENCE.md
 ├── architecture/             # System architecture
-│   └── MODULAR_ARCHITECTURE_SUMMARY.md
+│   ├── MODULAR_ARCHITECTURE_SUMMARY.md
+│   ├── AGENT_ARCHITECTURE_DIAGRAM.md
+│   └── MODULE_CONNECTIVITY_SPECIFICATION.md
 ├── deployment/               # Deployment guides
 │   └── COMPREHENSIVE_DEPLOYMENT_GUIDE.md
 ├── testing/                  # Testing documentation
