@@ -51,10 +51,15 @@ python3 test_module_control.py
 
 ## 📚 **Documentation**
 
-- **Deployment**: `deployment/linux-arm64/DEPLOYMENT_GUIDE.md`
-- **Module Control**: `docs/guides/MODULE_CONTROL_GUIDE.md`
-- **API Reference**: `docs/api/WEBSOCKET_PROTOCOL_SPECIFICATION.md`
-- **Architecture**: `docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md`
+📖 **[Complete Documentation](./docs/README.md)** - Organized documentation index
+
+### Quick Links:
+- **🚀 Production Setup**: [`docs/guides/PRODUCTION_READINESS_CHECKLIST.md`](./docs/guides/PRODUCTION_READINESS_CHECKLIST.md)
+- **🔌 Connection Guide**: [`docs/guides/AGENT_TEAM_CONNECTION_GUIDE.md`](./docs/guides/AGENT_TEAM_CONNECTION_GUIDE.md)
+- **🔧 Troubleshooting**: [`docs/guides/AGENT_TROUBLESHOOTING_GUIDE.md`](./docs/guides/AGENT_TROUBLESHOOTING_GUIDE.md)
+- **📡 WebSocket Protocol**: [`docs/api/WEBSOCKET_PROTOCOL_SPECIFICATION.md`](./docs/api/WEBSOCKET_PROTOCOL_SPECIFICATION.md)
+- **🏗️ Architecture**: [`docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md`](./docs/architecture/MODULAR_ARCHITECTURE_SUMMARY.md)
+- **🧪 Testing**: [`docs/testing/AGENT_CONNECTION_TEST.py`](./docs/testing/AGENT_CONNECTION_TEST.py)
 
 ## 🔧 **Build Targets**
 
