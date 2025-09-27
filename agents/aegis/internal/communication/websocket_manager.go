@@ -401,12 +401,12 @@ func (wsm *WebSocketManager) connect() error {
 	// DO NOT send heartbeat before authentication - backend will reject it
 	log.Printf("[websocket] Skipping initial heartbeat - must authenticate first")
 	
-	// Reset authentication state on new connection - each connection needs fresh authentication
+	// Reset authentication state on each new connection - backend sessions don't persist
 	wsm.isAuthenticated = false
 	wsm.isRegistered = false
 	log.Printf("[websocket] Reset authentication state for new connection")
 	
-	// Correct WebSocket flow: 1. Connect -> 2. Authenticate -> 3. Register -> 4. Heartbeats
+	// Always authenticate and register on new connection
 	log.Printf("[websocket] Starting WebSocket authentication")
 	if err := wsm.performWebSocketAuthentication(conn); err != nil {
 		log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
@@ -1605,7 +1605,7 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 	heartbeatMsg := SecureMessage{
 		ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
 		Type:      MessageTypeHeartbeat,
-		Channel:   "heartbeat",
+		Channel:   wsm.channels.Heartbeat, // Use the configured heartbeat channel
 		Payload:   base64.StdEncoding.EncodeToString([]byte("{}")),
 		Timestamp: time.Now().Unix(),
 		Nonce:     base64.StdEncoding.EncodeToString([]byte("heartbeat_nonce")),
@@ -1613,8 +1613,8 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 		Headers:   make(map[string]string),
 	}
 
-	// Heartbeats are unsigned (as per Python example)
-	// heartbeatMsg.Signature = wsm.signMessage(heartbeatMsg)
+	// Sign heartbeats (backend requires all messages to be signed)
+	heartbeatMsg.Signature = wsm.signMessage(heartbeatMsg)
 
 	// Send heartbeat with write mutex to prevent concurrent writes
 	wsm.writeMu.Lock()
