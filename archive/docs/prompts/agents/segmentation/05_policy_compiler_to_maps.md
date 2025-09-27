@@ -1,1 +1,0 @@
-Emit map snapshots from orchestrator.

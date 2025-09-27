@@ -1,1 +1,0 @@
-- Implement artifact fetch and download bundle from registry.

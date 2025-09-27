@@ -1,1 +1,0 @@
-- Load eBPF CO-RE programs via github.com/cilium/ebpf.
