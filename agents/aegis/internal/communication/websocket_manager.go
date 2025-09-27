@@ -401,32 +401,63 @@ func (wsm *WebSocketManager) connect() error {
 	// DO NOT send heartbeat before authentication - backend will reject it
 	log.Printf("[websocket] Skipping initial heartbeat - must authenticate first")
 	
-	// Reset authentication state on each new connection - backend sessions don't persist
-	wsm.isAuthenticated = false
-	wsm.isRegistered = false
-	log.Printf("[websocket] Reset authentication state for new connection")
-	
-	// Always authenticate and register on new connection
-	log.Printf("[websocket] Starting WebSocket authentication")
-	if err := wsm.performWebSocketAuthentication(conn); err != nil {
-		log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
-		return fmt.Errorf("authentication failed: %w", err)
+	// Only reset authentication state if we don't have valid session credentials
+	// This prevents duplicate registrations on reconnections
+	if wsm.sessionToken == "" || wsm.agentUID == "" || wsm.bootstrapToken == "" {
+		log.Printf("[websocket] No valid session credentials, will authenticate and register")
+		wsm.isAuthenticated = false
+		wsm.isRegistered = false
 	} else {
-		log.Printf("[websocket] WebSocket authentication completed successfully")
+		log.Printf("[websocket] Valid session credentials exist, attempting to reuse session")
+		log.Printf("[websocket] Session token: %s...", wsm.sessionToken[:20])
+		log.Printf("[websocket] Agent UID: %s", wsm.agentUID)
+		log.Printf("[websocket] Bootstrap token: %s...", wsm.bootstrapToken[:20])
+		// We have valid credentials, try to reuse them without re-registering
 		wsm.isAuthenticated = true
+		wsm.isRegistered = true
 	}
 	
-	log.Printf("[websocket] Starting WebSocket registration")
-	if err := wsm.performWebSocketRegistration(conn); err != nil {
-		log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
-		return fmt.Errorf("registration failed: %w", err)
+	// Only authenticate if not already authenticated
+	if !wsm.isAuthenticated {
+		log.Printf("[websocket] Starting WebSocket authentication")
+		if err := wsm.performWebSocketAuthentication(conn); err != nil {
+			log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
+			return fmt.Errorf("authentication failed: %w", err)
+		} else {
+			log.Printf("[websocket] WebSocket authentication completed successfully")
+			wsm.isAuthenticated = true
+		}
 	} else {
-		log.Printf("[websocket] WebSocket registration completed successfully")
-		wsm.isRegistered = true
+		log.Printf("[websocket] Already authenticated, skipping authentication")
+	}
+	
+	// Only register if not already registered
+	if !wsm.isRegistered {
+		log.Printf("[websocket] Starting WebSocket registration")
+		if err := wsm.performWebSocketRegistration(conn); err != nil {
+			log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
+			return fmt.Errorf("registration failed: %w", err)
+		} else {
+			log.Printf("[websocket] WebSocket registration completed successfully")
+			wsm.isRegistered = true
+		}
+	} else {
+		log.Printf("[websocket] Already registered, skipping registration")
 	}
 	
 	log.Printf("[websocket] Connected to backend at %s", wsm.backendURL)
 	return nil
+}
+
+// clearSessionCredentials clears all session-related credentials
+func (wsm *WebSocketManager) clearSessionCredentials() {
+	wsm.sessionToken = ""
+	wsm.sessionExpires = time.Time{}
+	wsm.agentUID = ""
+	wsm.bootstrapToken = ""
+	wsm.isAuthenticated = false
+	wsm.isRegistered = false
+	log.Printf("[websocket] Session credentials cleared")
 }
 
 // performWebSocketRegistration performs agent registration through WebSocket messages (as per working example)
@@ -1306,6 +1337,10 @@ func (wsm *WebSocketManager) reconnect() error {
 	}
 	wsm.connectionState = "reconnecting"
 	wsm.mu.Unlock()
+
+	// Clear session credentials on reconnection to prevent stale session issues
+	// This ensures we don't try to reuse invalid session data
+	wsm.clearSessionCredentials()
 
 	// Wait before reconnecting with exponential backoff
 	time.Sleep(wsm.reconnectDelay)
