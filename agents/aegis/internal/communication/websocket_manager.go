@@ -377,11 +377,22 @@ func (wsm *WebSocketManager) connect() error {
 		return fmt.Errorf("WebSocket connection timed out")
 	}
 
-	// Set connection parameters
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	// Set connection parameters - extend read deadline to prevent timeout between heartbeats
+	conn.SetReadDeadline(time.Now().Add(90 * time.Second)) // 90 seconds > heartbeat timeout (60s)
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(90 * time.Second)) // Reset deadline on pong
+		log.Printf("[websocket] Received pong, reset read deadline")
 		return nil
+	})
+	
+	// Set ping handler to respond to backend pings
+	conn.SetPingHandler(func(message string) error {
+		log.Printf("[websocket] Received ping, sending pong")
+		err := conn.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second))
+		if err != nil {
+			log.Printf("[websocket] Failed to send pong: %v", err)
+		}
+		return err
 	})
 
 	// WebSocket connection established, proceed with normal messaging
@@ -402,39 +413,38 @@ func (wsm *WebSocketManager) connect() error {
 	// DO NOT send heartbeat before authentication - backend will reject it
 	log.Printf("[websocket] Skipping initial heartbeat - must authenticate first")
 	
-	// Only reset authentication state if we don't have valid session credentials
-	// This prevents duplicate registrations on reconnections
-	if wsm.sessionToken == "" || wsm.agentUID == "" || wsm.bootstrapToken == "" {
-		log.Printf("[websocket] No valid session credentials, will authenticate and register")
-		wsm.isAuthenticated = false
-		wsm.isRegistered = false
-	} else {
-		log.Printf("[websocket] Valid session credentials exist, attempting to reuse session")
+	// FIXED: Always authenticate on new connection - let backend validate session
+	// This prevents infinite reconnection loops caused by assuming session validity
+	log.Printf("[websocket] Always authenticating on new connection to validate session with backend")
+	wsm.isAuthenticated = false
+	wsm.isRegistered = false
+	
+	// Check if we have stored credentials to include in authentication
+	if wsm.sessionToken != "" && wsm.agentUID != "" && wsm.bootstrapToken != "" {
+		log.Printf("[websocket] Stored credentials exist, will include in authentication request")
 		log.Printf("[websocket] Session token: %s...", wsm.sessionToken[:20])
 		log.Printf("[websocket] Agent UID: %s", wsm.agentUID)
 		log.Printf("[websocket] Bootstrap token: %s...", wsm.bootstrapToken[:20])
-		// We have valid credentials, try to reuse them without re-registering
-		wsm.isAuthenticated = true
-		wsm.isRegistered = true
 	}
 	
-	// Only authenticate if not already authenticated
-	if !wsm.isAuthenticated {
-		log.Printf("[websocket] Starting WebSocket authentication")
-		if err := wsm.performWebSocketAuthentication(conn); err != nil {
-			log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
-			return fmt.Errorf("authentication failed: %w", err)
-		} else {
-			log.Printf("[websocket] WebSocket authentication completed successfully")
-			wsm.isAuthenticated = true
-		}
+	// Always authenticate first - let backend validate if session is still valid
+	log.Printf("[websocket] Starting WebSocket authentication")
+	if err := wsm.performWebSocketAuthentication(conn); err != nil {
+		log.Printf("[websocket] Warning: failed to perform WebSocket authentication: %v", err)
+		return fmt.Errorf("authentication failed: %w", err)
 	} else {
-		log.Printf("[websocket] Already authenticated, skipping authentication")
+		log.Printf("[websocket] WebSocket authentication completed successfully")
+		wsm.isAuthenticated = true
+		
+		// CRITICAL: Send immediate heartbeat to prevent backend timeout
+		log.Printf("[websocket] Sending immediate heartbeat after authentication to prevent timeout")
+		wsm.sendHeartbeat()
 	}
 	
-	// Only register if not already registered
-	if !wsm.isRegistered {
-		log.Printf("[websocket] Starting WebSocket registration")
+	// Only register if we don't already have valid registration credentials
+	// This prevents creating multiple registrations on reconnections
+	if wsm.agentUID == "" || wsm.bootstrapToken == "" {
+		log.Printf("[websocket] No registration credentials, performing WebSocket registration")
 		if err := wsm.performWebSocketRegistration(conn); err != nil {
 			log.Printf("[websocket] Warning: failed to perform WebSocket registration: %v", err)
 			return fmt.Errorf("registration failed: %w", err)
@@ -443,7 +453,10 @@ func (wsm *WebSocketManager) connect() error {
 			wsm.isRegistered = true
 		}
 	} else {
-		log.Printf("[websocket] Already registered, skipping registration")
+		log.Printf("[websocket] Valid registration credentials exist, skipping registration")
+		log.Printf("[websocket] Agent UID: %s", wsm.agentUID)
+		log.Printf("[websocket] Bootstrap token: %s...", wsm.bootstrapToken[:20])
+		wsm.isRegistered = true
 	}
 	
 	// Reset connection failure count on successful connection
@@ -1240,7 +1253,7 @@ func (wsm *WebSocketManager) processMessage(msg SecureMessage) error {
 
 // heartbeat sends periodic heartbeat messages
 func (wsm *WebSocketManager) heartbeat() {
-	ticker := time.NewTicker(60 * time.Second) // Send heartbeat every 60 seconds (production-ready)
+	ticker := time.NewTicker(20 * time.Second) // Send heartbeat every 20 seconds (very frequent to prevent timeouts)
 	defer ticker.Stop()
 
 	log.Printf("[websocket] Heartbeat goroutine started")
@@ -1347,16 +1360,13 @@ func (wsm *WebSocketManager) reconnect() error {
 	wsm.connectionState = "reconnecting"
 	wsm.mu.Unlock()
 
-	// Only clear session credentials if we've had multiple consecutive failures
-	// This prevents clearing valid sessions due to temporary network issues
+	// FIXED: Don't clear credentials on reconnection - this prevents registration loops
+	// The agent should only clear credentials on explicit authentication failure, not connection drops
 	wsm.incrementConnectionFailureCount()
-	if wsm.connectionFailureCount >= 3 {
-		log.Printf("[websocket] Multiple connection failures (%d), clearing session credentials", wsm.connectionFailureCount)
-		wsm.clearSessionCredentials()
-		wsm.connectionFailureCount = 0
-	} else {
-		log.Printf("[websocket] Connection failure %d, preserving session credentials", wsm.connectionFailureCount)
-	}
+	log.Printf("[websocket] Connection failure %d, preserving all session credentials to prevent registration loops", wsm.connectionFailureCount)
+	
+	// Only clear credentials if we have explicit authentication failures, not connection drops
+	// This prevents the infinite registration loop issue
 
 	// Wait before reconnecting with exponential backoff
 	time.Sleep(wsm.reconnectDelay)
@@ -1652,6 +1662,17 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 		return
 	}
 
+	// Send a WebSocket ping to keep the connection alive
+	wsm.writeMu.Lock()
+	err := conn.WriteControl(websocket.PingMessage, []byte("heartbeat"), time.Now().Add(time.Second))
+	wsm.writeMu.Unlock()
+	
+	if err != nil {
+		log.Printf("[websocket] Failed to send ping: %v", err)
+		wsm.incrementErrorCount()
+		return
+	}
+
 	// Create heartbeat message
 	heartbeatMsg := SecureMessage{
 		ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
@@ -1669,7 +1690,7 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 
 	// Send heartbeat with write mutex to prevent concurrent writes
 	wsm.writeMu.Lock()
-	err := conn.WriteJSON(heartbeatMsg)
+	err = conn.WriteJSON(heartbeatMsg)
 	wsm.writeMu.Unlock()
 	
 	if err != nil {
@@ -1684,7 +1705,7 @@ func (wsm *WebSocketManager) sendHeartbeat() {
 	wsm.healthChecker.lastHeartbeat = time.Now()
 	wsm.healthChecker.mu.Unlock()
 
-	log.Printf("[websocket] Heartbeat sent, lastHeartbeat updated to: %v", wsm.healthChecker.lastHeartbeat)
+	log.Printf("[websocket] Heartbeat sent (ping + message), lastHeartbeat updated to: %v", wsm.healthChecker.lastHeartbeat)
 }
 
 // reconnectionHandler handles graceful reconnection requests
