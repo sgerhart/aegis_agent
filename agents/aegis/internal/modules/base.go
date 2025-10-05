@@ -11,17 +11,18 @@ import (
 
 // BaseModule provides a base implementation for modules
 type BaseModule struct {
-	info       ModuleInfo
-	config     ModuleConfig
-	status     ModuleStatus
-	logger     *telemetry.Logger
-	mu         sync.RWMutex
-	ctx        context.Context
-	cancel     context.CancelFunc
-	startTime  time.Time
-	metrics    map[string]interface{}
-	eventChan  chan telemetry.Event
-	closed     sync.Once // Ensure channel is closed only once
+	info          ModuleInfo
+	config        ModuleConfig
+	status        ModuleStatus
+	logger        *telemetry.Logger
+	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	startTime     time.Time
+	metrics       map[string]interface{}
+	eventChan     chan telemetry.Event
+	closed        sync.Once // Ensure channel is closed only once
+	moduleManager ModuleManager // Reference to the module manager
 }
 
 // NewBaseModule creates a new base module
@@ -290,6 +291,20 @@ func (bm *BaseModule) EmitTelemetryEvent(eventType string, message string, metad
 	}
 	
 	bm.SendEvent(event)
+}
+
+// SetModuleManager sets the module manager reference
+func (bm *BaseModule) SetModuleManager(moduleManager ModuleManager) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.moduleManager = moduleManager
+}
+
+// GetModuleManager returns the module manager reference
+func (bm *BaseModule) GetModuleManager() ModuleManager {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.moduleManager
 }
 
 // ModuleRegistryImpl implements the ModuleRegistry interface

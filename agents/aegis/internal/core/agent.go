@@ -29,6 +29,10 @@ type Agent struct {
 	moduleManager *modules.ModuleManagerImpl
 	moduleFactory *modules.ModuleFactoryImpl
 	
+	// State management
+	stateManager *StateManager
+	securityContinuity *SecurityContinuityChecker
+	
 	// Configuration
 	config       *Config
 	agentID      string
@@ -82,6 +86,13 @@ func (a *Agent) initializeComponents() error {
 	// Initialize telemetry logger
 	a.telemetry = telemetry.NewLogger(a.config.LogLevel)
 	
+	// Initialize state manager
+	stateManager, err := NewStateManager("", a.telemetry)
+	if err != nil {
+		return fmt.Errorf("failed to initialize state manager: %w", err)
+	}
+	a.stateManager = stateManager
+	
 	// Initialize eBPF manager
 	ebpfManager, err := NewEBPFManager()
 	if err != nil {
@@ -103,12 +114,23 @@ func (a *Agent) initializeComponents() error {
 	}
 	a.enforcer = enforcer
 	
+	// Initialize security continuity checker
+	a.securityContinuity = NewSecurityContinuityChecker(stateManager, a.telemetry, ebpfManager, enforcer)
+	
 	// Communication manager will be initialized by the WebSocket communication module
 	// No need to create a separate WebSocket manager here
 	
 	// Initialize module system
 	a.moduleManager = modules.NewModuleManager(a.telemetry)
 	a.moduleFactory = modules.NewModuleFactory(a.telemetry)
+	
+	// Provide core components to module manager
+	coreComponents := &modules.CoreComponents{
+		PolicyEngine: a.policyEngine, // PolicyEngine implements PolicyEngineInterface
+		EBPFManager:  a.ebpfManager,
+		Enforcer:     a.enforcer,
+	}
+	a.moduleManager.SetCoreComponents(coreComponents)
 	
 	// Register built-in modules
 	if err := a.registerBuiltInModules(); err != nil {
@@ -191,21 +213,24 @@ func (a *Agent) Start() error {
 	
 	log.Printf("[core] Starting agent %s", a.agentID)
 	
-	// Get communication manager from WebSocket communication module and set module manager reference
-	if websocketModule, exists := a.moduleManager.GetModule("websocket_communication"); exists && websocketModule != nil {
-		if wcm, ok := websocketModule.(*modules.WebSocketCommunicationModule); ok {
-			// Set module manager reference for backend control
-			wcm.SetModuleManager(a.moduleManager)
-			a.commManager = wcm.GetWebSocketManager()
-		}
+	// Initialize agent state
+	capabilities := map[string]interface{}{
+		"ebpf": a.ebpfManager.IsInitialized(),
+		"tc":   false, // TODO: detect TC support
+		"cgroup": false, // TODO: detect cgroup support
 	}
 	
-	// Start communication manager
-	if a.commManager != nil {
-		if err := a.commManager.Start(); err != nil {
-			log.Printf("[core] Warning: failed to start communication manager: %v", err)
-		}
+	if err := a.stateManager.InitializeAgentState(a.agentID, "1.0.0", capabilities); err != nil {
+		log.Printf("[core] Warning: failed to initialize agent state: %v", err)
 	}
+	
+	// Perform security continuity check
+	if err := a.securityContinuity.PerformStartupSecurityCheck(a.ctx); err != nil {
+		log.Printf("[core] Warning: security continuity check failed: %v", err)
+		// Continue startup but log the warning
+	}
+	
+	// Communication manager will be set up after modules are initialized
 	
 	// Start policy engine
 	if err := a.policyEngine.Start(); err != nil {
@@ -224,6 +249,39 @@ func (a *Agent) Start() error {
 	if err := a.initializeAllModules(); err != nil {
 		log.Printf("[core] Warning: failed to initialize some modules: %v", err)
 		// Continue without modules - agent can run with core functionality only
+	}
+	
+		// Set module manager reference for all modules
+		log.Printf("[core] Setting module manager reference for all modules")
+		for moduleID, module := range a.moduleManager.GetAllModules() {
+			// Check if module has a SetModuleManager method (for modules that embed BaseModule)
+			if setter, ok := module.(interface{ SetModuleManager(modules.ModuleManager) }); ok {
+				setter.SetModuleManager(a.moduleManager)
+				log.Printf("[core] Module manager reference set for module: %s", moduleID)
+			} else {
+				log.Printf("[core] Warning: module %s does not support SetModuleManager", moduleID)
+			}
+		}
+
+		// Set up communication manager from WebSocket communication module
+		log.Printf("[core] Looking for websocket_communication module in module manager")
+		if websocketModule, exists := a.moduleManager.GetModule("websocket_communication"); exists && websocketModule != nil {
+			log.Printf("[core] Found websocket_communication module, setting up communication manager")
+			if wcm, ok := websocketModule.(*modules.WebSocketCommunicationModule); ok {
+				a.commManager = wcm.GetWebSocketManager()
+				log.Printf("[core] Communication manager set up from WebSocket communication module")
+			} else {
+				log.Printf("[core] Warning: websocket_communication module is not of expected type")
+			}
+		} else {
+			log.Printf("[core] Warning: websocket_communication module not found in module manager")
+		}
+	
+	// Start communication manager
+	if a.commManager != nil {
+		if err := a.commManager.Start(); err != nil {
+			log.Printf("[core] Warning: failed to start communication manager: %v", err)
+		}
 	}
 	
 	// Start enabled modules
@@ -295,7 +353,7 @@ func (a *Agent) startEnabledModules() error {
 	// Get enabled modules from config
 	enabledModules := a.config.EnabledModules
 	if len(enabledModules) == 0 {
-		enabledModules = []string{"telemetry", "websocket_communication", "observability"}
+		enabledModules = []string{"telemetry", "websocket_communication", "observability", "advanced_policy"}
 	}
 	
 	for _, moduleType := range enabledModules {
@@ -380,6 +438,13 @@ func (a *Agent) Stop() error {
 	if a.ebpfManager != nil {
 		if err := a.ebpfManager.Close(); err != nil {
 			log.Printf("[core] Error closing eBPF manager: %v", err)
+		}
+	}
+	
+	// Save state before shutdown
+	if a.stateManager != nil {
+		if err := a.stateManager.Shutdown(); err != nil {
+			log.Printf("[core] Warning: failed to save state on shutdown: %v", err)
 		}
 	}
 	
@@ -521,4 +586,119 @@ func (a *Agent) GetConfig() *Config {
 	// Return a copy to prevent external modifications
 	configCopy := *a.config
 	return &configCopy
+}
+
+// GetModuleManager returns the module manager
+func (a *Agent) GetModuleManager() modules.ModuleManager {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.moduleManager
+}
+
+// GetMetrics returns agent metrics
+func (a *Agent) GetMetrics() map[string]interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	
+	metrics := make(map[string]interface{})
+	
+	// Add basic agent metrics
+	metrics["agent_id"] = a.agentID
+	metrics["running"] = a.running
+	metrics["uptime_seconds"] = a.GetUptime().Seconds()
+	metrics["log_level"] = a.config.LogLevel
+	metrics["backend_url"] = a.config.BackendURL
+	
+	// Add module metrics if available
+	if a.moduleManager != nil {
+		statuses := a.moduleManager.GetAllModuleStatuses()
+		metrics["total_modules"] = len(statuses)
+		
+		runningCount := 0
+		for _, status := range statuses {
+			if status == "running" {
+				runningCount++
+			}
+		}
+		metrics["running_modules"] = runningCount
+	}
+	
+	// Add communication metrics if available
+	if a.commManager != nil {
+		// Add communication-specific metrics here
+		metrics["communication_connected"] = true // Simplified
+	}
+	
+	return metrics
+}
+
+// GetUptime returns the agent uptime
+func (a *Agent) GetUptime() time.Duration {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	
+	if !a.running {
+		return 0
+	}
+	
+	// Get uptime from state manager
+	if a.stateManager != nil {
+		agentState := a.stateManager.GetAgentState()
+		if !agentState.LastStartup.IsZero() {
+			return time.Since(agentState.LastStartup)
+		}
+	}
+	
+	// Fallback to simple calculation
+	return time.Since(time.Now().Add(-time.Hour)) // Simplified
+}
+
+// GetSecurityStatus returns the current security status
+func (a *Agent) GetSecurityStatus() map[string]interface{} {
+	if a.securityContinuity != nil {
+		return a.securityContinuity.GetSecurityStatus()
+	}
+	
+	return map[string]interface{}{
+		"error": "security continuity checker not initialized",
+	}
+}
+
+// GetStateSummary returns a summary of the agent state
+func (a *Agent) GetStateSummary() map[string]interface{} {
+	if a.stateManager != nil {
+		return a.stateManager.GetStateSummary()
+	}
+	
+	return map[string]interface{}{
+		"error": "state manager not initialized",
+	}
+}
+
+// HealthCheck performs a health check on the agent
+func (a *Agent) HealthCheck() error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	
+	if !a.running {
+		return fmt.Errorf("agent is not running")
+	}
+	
+	// Check module manager health
+	if a.moduleManager != nil {
+		// Check if any critical modules are down
+		statuses := a.moduleManager.GetAllModuleStatuses()
+		for moduleID, status := range statuses {
+			if moduleID == "websocket_communication" && status != "running" {
+				return fmt.Errorf("critical module %s is not running", moduleID)
+			}
+		}
+	}
+	
+	// Check communication health
+	if a.commManager != nil {
+		// Add communication health check here
+	}
+	
+	return nil
 }

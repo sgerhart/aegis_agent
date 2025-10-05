@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"agents/aegis/pkg/models"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/rlimit"
 )
 
 // EBPFManager manages eBPF programs and maps
@@ -43,6 +46,15 @@ func NewEBPFManager() (*EBPFManager, error) {
 		log.Printf("[ebpf_manager] eBPF not supported on %s/%s, running in compatibility mode", runtime.GOOS, runtime.GOARCH)
 		em.initialized = true
 		return em, nil
+	}
+	
+	// Remove MEMLOCK limit to allow eBPF map creation
+	if err := rlimit.RemoveMemlock(); err != nil {
+		log.Printf("[ebpf_manager] Warning: failed to remove MEMLOCK limit: %v", err)
+		log.Printf("[ebpf_manager] eBPF functionality may be limited due to MEMLOCK restrictions")
+		// Continue anyway - some functionality might still work
+	} else {
+		log.Printf("[ebpf_manager] MEMLOCK limit removed successfully")
 	}
 	
 	if err := em.initialize(); err != nil {
@@ -104,7 +116,8 @@ func (em *EBPFManager) loadMaps() error {
 	
 	// Load basic eBPF maps
 	mapNames := []string{
-		"aegis_blocked_destinations",
+		"blocked_destinations",
+		"stats",
 		"policy_edges",
 		"allow_lpm4",
 		"mode",
@@ -139,6 +152,20 @@ func (em *EBPFManager) loadMap(mapName string) (*ebpf.Map, error) {
 	// Define map specs based on map name
 	var mapSpec *ebpf.MapSpec
 	switch mapName {
+	case "blocked_destinations":
+		mapSpec = &ebpf.MapSpec{
+			Type:       ebpf.Hash,
+			KeySize:    4, // uint32
+			ValueSize:  4, // uint32
+			MaxEntries: 1024,
+		}
+	case "stats":
+		mapSpec = &ebpf.MapSpec{
+			Type:       ebpf.Array,
+			KeySize:    4, // uint32
+			ValueSize:  8, // uint64
+			MaxEntries: 1,
+		}
 	case "aegis_blocked_destinations":
 		mapSpec = &ebpf.MapSpec{
 			Type:       ebpf.Hash,
@@ -175,9 +202,12 @@ func (em *EBPFManager) loadMap(mapName string) (*ebpf.Map, error) {
 	if err != nil {
 		// Check if it's a MEMLOCK permission issue
 		if strings.Contains(err.Error(), "MEMLOCK") || strings.Contains(err.Error(), "operation not permitted") {
-			log.Printf("[ebpf_manager] Warning: failed to create map %s due to insufficient permissions (MEMLOCK may be too low): %v", mapName, err)
-			log.Printf("[ebpf_manager] Consider running: sudo ulimit -l unlimited")
-			return nil, fmt.Errorf("failed to create map %s: creating map: map create: operation not permitted (MEMLOCK may be too low, consider rlimit.RemoveMemlock)", mapName)
+			log.Printf("[ebpf_manager] Error: failed to create map %s due to insufficient permissions: %v", mapName, err)
+			log.Printf("[ebpf_manager] Solutions:")
+			log.Printf("[ebpf_manager]   1. Run as root: sudo ./aegis-agent")
+			log.Printf("[ebpf_manager]   2. Set ulimit: sudo ulimit -l unlimited")
+			log.Printf("[ebpf_manager]   3. Check if rlimit.RemoveMemlock() was called during initialization")
+			return nil, fmt.Errorf("failed to create map %s: MEMLOCK permission denied - run as root or set ulimit -l unlimited", mapName)
 		}
 		return nil, fmt.Errorf("failed to create map %s: %w", mapName, err)
 	}
@@ -193,9 +223,45 @@ func (em *EBPFManager) loadPrograms() error {
 		return nil
 	}
 	
-	// For now, we'll skip program loading as it requires compiled eBPF objects
-	// In production, this would load the actual eBPF programs
-	log.Printf("[ebpf_manager] Program loading skipped (requires compiled eBPF objects)")
+	// Load the policy enforcer eBPF program
+	if err := em.loadPolicyEnforcerProgram(); err != nil {
+		log.Printf("[ebpf_manager] Warning: failed to load policy enforcer program: %v", err)
+		// Continue without this program - enforcement will be limited
+	}
+	
+	log.Printf("[ebpf_manager] eBPF program loading completed")
+	return nil
+}
+
+// loadPolicyEnforcerProgram loads the policy enforcer eBPF program
+func (em *EBPFManager) loadPolicyEnforcerProgram() error {
+	// Try to load from the compiled eBPF object file
+	objFile := "/home/steve/aegis_agent/bpf/aegis_tc_egress_enforcer.bpf.o"
+	
+	// Load the eBPF object file
+	spec, err := ebpf.LoadCollectionSpec(objFile)
+	if err != nil {
+		return fmt.Errorf("failed to load eBPF collection spec from %s: %w", objFile, err)
+	}
+	
+	// Load the collection
+	coll, err := ebpf.NewCollection(spec)
+	if err != nil {
+		return fmt.Errorf("failed to load eBPF collection: %w", err)
+	}
+	
+	// Store the programs and maps
+	for name, prog := range coll.Programs {
+		em.programs[name] = prog
+		log.Printf("[ebpf_manager] Loaded eBPF program: %s", name)
+	}
+	
+	for name, m := range coll.Maps {
+		em.maps[name] = m
+		log.Printf("[ebpf_manager] Loaded eBPF map: %s", name)
+	}
+	
+	log.Printf("[ebpf_manager] Policy enforcer eBPF program loaded successfully")
 	return nil
 }
 
@@ -207,9 +273,59 @@ func (em *EBPFManager) attachPrograms() error {
 		return nil
 	}
 	
-	// For now, we'll skip program attachment
-	// In production, this would attach programs to appropriate hooks
-	log.Printf("[ebpf_manager] Program attachment skipped (requires eBPF programs)")
+	// Attach the policy enforcer program to cgroup egress
+	if err := em.attachPolicyEnforcerProgram(); err != nil {
+		log.Printf("[ebpf_manager] Warning: failed to attach policy enforcer program: %v", err)
+		// Continue without attachment - enforcement will be limited
+	}
+	
+	log.Printf("[ebpf_manager] eBPF program attachment completed")
+	return nil
+}
+
+// attachPolicyEnforcerProgram attaches the policy enforcer to network interface
+func (em *EBPFManager) attachPolicyEnforcerProgram() error {
+	// Find the policy enforcer program
+	prog, exists := em.programs["aegis_tc_egress_filter"]
+	if !exists {
+		return fmt.Errorf("policy enforcer program not found")
+	}
+	
+	// Try TC egress attachment (most effective for outgoing traffic filtering)
+	interfaceName := "ens160" // Main network interface
+	
+	// Create TC qdisc if it doesn't exist
+	cmd := exec.Command("tc", "qdisc", "add", "dev", interfaceName, "clsact")
+	cmd.Run() // Ignore error if qdisc already exists
+	
+	// Try to attach to TC egress using tc command
+	cmd = exec.Command("tc", "filter", "add", "dev", interfaceName, "egress", "bpf", "direct-action", "object-file", "/home/steve/aegis_agent/bpf/aegis_tc_egress_enforcer.bpf.o", "section", "tc")
+	if err := cmd.Run(); err != nil {
+		log.Printf("[ebpf_manager] Warning: TC egress attachment failed: %v", err)
+		
+		// Fallback to cgroup egress
+		cgroupPath := "/sys/fs/cgroup"
+		cgroup, err := os.Open(cgroupPath)
+		if err != nil {
+			return fmt.Errorf("failed to open cgroup %s: %w", cgroupPath, err)
+		}
+		defer cgroup.Close()
+
+		linkObj, err := link.AttachCgroup(link.CgroupOptions{
+			Path:    cgroupPath,
+			Attach:  ebpf.AttachCGroupInetEgress,
+			Program: prog,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to attach eBPF program to cgroup: %w", err)
+		}
+		em.links["aegis_tc_egress_filter"] = linkObj
+		log.Printf("[ebpf_manager] Policy enforcer program attached to cgroup egress (fallback)")
+	} else {
+		log.Printf("[ebpf_manager] Policy enforcer program attached to TC egress on %s successfully", interfaceName)
+		em.links["aegis_tc_egress_filter"] = nil
+	}
+
 	return nil
 }
 
@@ -226,8 +342,11 @@ func (em *EBPFManager) ApplyPolicy(policy *models.Policy) error {
 		return fmt.Errorf("eBPF manager not initialized")
 	}
 	
+	log.Printf("[ebpf_manager] Applying policy %s with %d rules", policy.ID, len(policy.Rules))
+	
 	// Apply policy rules to eBPF maps
-	for _, rule := range policy.Rules {
+	for i, rule := range policy.Rules {
+		log.Printf("[ebpf_manager] Processing rule %d: %s (action: %s, conditions: %d)", i, rule.ID, rule.Action, len(rule.Conditions))
 		if err := em.applyRule(rule); err != nil {
 			return fmt.Errorf("failed to apply rule %s: %w", rule.ID, err)
 		}
@@ -239,8 +358,11 @@ func (em *EBPFManager) ApplyPolicy(policy *models.Policy) error {
 
 // applyRule applies a single rule to eBPF maps
 func (em *EBPFManager) applyRule(rule models.Rule) error {
+	log.Printf("[ebpf_manager] Applying rule %s with %d conditions", rule.ID, len(rule.Conditions))
+	
 	// Convert rule to eBPF map entries
-	for _, condition := range rule.Conditions {
+	for i, condition := range rule.Conditions {
+		log.Printf("[ebpf_manager] Processing condition %d: field=%s, operator=%s, value=%v", i, condition.Field, condition.Operator, condition.Value)
 		if err := em.applyCondition(condition, rule.Action); err != nil {
 			return fmt.Errorf("failed to apply condition: %w", err)
 		}
@@ -268,6 +390,8 @@ func (em *EBPFManager) applyCondition(condition models.Condition, action string)
 
 // applyDestinationIPCondition applies destination IP condition
 func (em *EBPFManager) applyDestinationIPCondition(condition models.Condition, action string) error {
+	log.Printf("[ebpf_manager] applyDestinationIPCondition called: value=%v, action=%s", condition.Value, action)
+	
 	// Parse IP address
 	ip := net.ParseIP(fmt.Sprintf("%v", condition.Value))
 	if ip == nil {
@@ -278,6 +402,8 @@ func (em *EBPFManager) applyDestinationIPCondition(condition models.Condition, a
 	if ipv4 == nil {
 		return fmt.Errorf("IPv6 not supported")
 	}
+	
+	log.Printf("[ebpf_manager] Parsed IPv4 address: %s", ipv4.String())
 	
 	// Convert action to uint32
 	var actionValue uint32
@@ -291,18 +417,28 @@ func (em *EBPFManager) applyDestinationIPCondition(condition models.Condition, a
 	}
 	
 	// Apply to blocked destinations map
-	if blockedMap, exists := em.maps["aegis_blocked_destinations"]; exists {
+	if blockedMap, exists := em.maps["blocked_destinations"]; exists {
+		// Store IP in network byte order (big-endian) to match eBPF program expectations
+		// The eBPF program uses bpf_ntohl(ip->daddr) which converts network to host byte order
+		// So we need to store in network byte order (big-endian)
 		key := uint32(ipv4[0])<<24 | uint32(ipv4[1])<<16 | uint32(ipv4[2])<<8 | uint32(ipv4[3])
+		log.Printf("[ebpf_manager] Map key for %s: %d (0x%x) - network byte order", ipv4.String(), key, key)
 		
 		if actionValue == 0 { // Block
+			log.Printf("[ebpf_manager] Adding blocked destination %s to map", ipv4.String())
 			if err := blockedMap.Put(key, uint32(1)); err != nil {
 				return fmt.Errorf("failed to add blocked destination: %w", err)
 			}
+			log.Printf("[ebpf_manager] Successfully added blocked destination %s to map", ipv4.String())
 		} else { // Allow
+			log.Printf("[ebpf_manager] Removing allowed destination %s from map", ipv4.String())
 			if err := blockedMap.Delete(key); err != nil {
 				log.Printf("[ebpf_manager] Warning: failed to remove blocked destination: %v", err)
 			}
+			log.Printf("[ebpf_manager] Successfully removed allowed destination %s from map", ipv4.String())
 		}
+	} else {
+		log.Printf("[ebpf_manager] Warning: blocked_destinations map not found, cannot apply IP condition")
 	}
 	
 	return nil
@@ -319,8 +455,9 @@ func (em *EBPFManager) applySourceIPCondition(condition models.Condition, action
 // applyProtocolCondition applies protocol condition
 func (em *EBPFManager) applyProtocolCondition(condition models.Condition, action string) error {
 	// Protocol-based conditions
-	// For now, we'll log and skip
-	log.Printf("[ebpf_manager] Protocol condition not yet implemented")
+	// For ICMP, we'll just log and continue - the destination IP condition will handle the blocking
+	protocol := fmt.Sprintf("%v", condition.Value)
+	log.Printf("[ebpf_manager] Protocol condition: %s (action: %s) - continuing with other conditions", protocol, action)
 	return nil
 }
 

@@ -62,6 +62,21 @@ type ModuleInterface interface {
 	GetMetrics() map[string]interface{}
 }
 
+// PolicyEngineInterface defines the interface for policy engine operations
+type PolicyEngineInterface interface {
+	AddPolicy(policy *models.Policy) error
+	RemovePolicy(policyID string) error
+	GetPolicy(policyID string) (*models.Policy, error)
+	GetAllPolicies() map[string]*models.Policy
+}
+
+// CoreComponents provides access to core agent components
+type CoreComponents struct {
+	PolicyEngine PolicyEngineInterface `json:"policy_engine"`
+	EBPFManager  interface{}           `json:"ebpf_manager"`
+	Enforcer     interface{}           `json:"enforcer"`
+}
+
 // ModuleManager manages the lifecycle of all modules
 type ModuleManager interface {
 	// Module management
@@ -98,6 +113,9 @@ type ModuleManager interface {
 	DiscoverModules() []string
 	LoadModule(modulePath string) error
 	UnloadModule(moduleID string) error
+	
+	// Core components access
+	GetCoreComponents() *CoreComponents
 }
 
 // EventHandler defines the interface for handling module events

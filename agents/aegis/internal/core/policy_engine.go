@@ -337,6 +337,7 @@ func (pe *PolicyEngine) validateRule(rule models.Rule, index int) error {
 		"allow": true,
 		"deny":  true,
 		"drop":  true,
+		"block": true,
 		"log":   true,
 	}
 	
@@ -366,11 +367,12 @@ func (pe *PolicyEngine) validateCondition(condition models.Condition, index int)
 	
 	// Validate operator values
 	validOperators := map[string]bool{
-		"eq":   true,
-		"ne":   true,
-		"in":   true,
-		"notin": true,
-		"cidr": true,
+		"eq":      true,
+		"equals":  true,
+		"ne":      true,
+		"in":      true,
+		"notin":   true,
+		"cidr":    true,
 	}
 	
 	if !validOperators[condition.Operator] {

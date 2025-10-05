@@ -2,12 +2,15 @@ package modules
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"agents/aegis/internal/communication"
 	"agents/aegis/internal/telemetry"
+	"agents/aegis/pkg/models"
 )
 
 // WebSocketCommunicationModule provides advanced WebSocket communication capabilities
@@ -111,6 +114,10 @@ func (wcm *WebSocketCommunicationModule) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start WebSocket manager: %w", err)
 	}
 	wcm.LogInfo("WebSocket manager started successfully")
+
+	// Subscribe to backend channels after WebSocket connection is established
+	// This ensures we use the UID-based channels after registration
+	wcm.subscribeToBackendChannels()
 
 	// Start background processes
 	go wcm.monitorConnection()
@@ -419,9 +426,7 @@ func (wcm *WebSocketCommunicationModule) registerDefaultHandlers() {
 
 	// Register policy commands handler
 	wcm.websocketManager.RegisterHandler("backend.policies", func(msg communication.SecureMessage) error {
-		wcm.LogInfo("Received policy command: %s", msg.Payload)
-		// Process policy command here
-		return nil
+		return wcm.handlePolicyMessage(msg)
 	})
 
 	// Register investigation requests handler
@@ -437,6 +442,183 @@ func (wcm *WebSocketCommunicationModule) registerDefaultHandlers() {
 		// Process threat intelligence here
 		return nil
 	})
+}
+
+// subscribeToBackendChannels subscribes to backend channels to receive messages
+func (wcm *WebSocketCommunicationModule) subscribeToBackendChannels() {
+	// Use generic backend channels (not UID-based) since backend sends to generic channels
+	backendChannels := []string{
+		"backend.policies",
+		"backend.investigations", 
+		"backend.threats",
+		"backend.processes",
+		"backend.tests",
+		"backend.rollbacks",
+	}
+
+	for _, channelName := range backendChannels {
+		// Create handler for this channel
+		handler := func(channel string) communication.MessageHandler {
+			return func(msg communication.SecureMessage) error {
+				wcm.LogInfo("Received message on channel %s: %s", channel, msg.Payload)
+				// Process message based on channel type
+				channels := wcm.websocketManager.GetChannels()
+				switch channel {
+				case channels.PolicyCommands:
+					return wcm.handlePolicyMessage(msg)
+				case channels.InvestigationReq:
+					return wcm.handleInvestigationMessage(msg)
+				case channels.ThreatIntel:
+					return wcm.handleThreatMessage(msg)
+				default:
+					wcm.LogInfo("Received message on channel %s: %s", channel, msg.Payload)
+					return nil
+				}
+			}
+		}(channelName)
+
+		// Subscribe to the channel
+		if err := wcm.channelManager.Subscribe(channelName, "websocket_module", handler, 1); err != nil {
+			wcm.LogError("Failed to subscribe to channel %s: %v", channelName, err)
+		} else {
+			wcm.LogInfo("Subscribed to channel: %s", channelName)
+		}
+	}
+}
+
+// handlePolicyMessage handles policy messages from backend
+func (wcm *WebSocketCommunicationModule) handlePolicyMessage(msg communication.SecureMessage) error {
+	wcm.LogInfo("Processing policy message: %s", msg.Payload)
+	
+	// Decode the base64 payload
+	payloadBytes, err := base64.StdEncoding.DecodeString(msg.Payload)
+	if err != nil {
+		return fmt.Errorf("failed to decode policy payload: %w", err)
+	}
+	
+	// Parse the JSON policy message
+	var policyMsg map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &policyMsg); err != nil {
+		return fmt.Errorf("failed to parse policy message: %w", err)
+	}
+	
+	// Check if this is a deploy_policy action
+	action, ok := policyMsg["action"].(string)
+	if !ok || action != "deploy_policy" {
+		wcm.LogInfo("Ignoring non-deploy policy message: %s", action)
+		return nil
+	}
+	
+	// Extract policy configuration
+	policyConfig, ok := policyMsg["policy_config"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("policy_config not found in message")
+	}
+	
+	policyID, ok := policyMsg["policy_id"].(string)
+	if !ok {
+		policyID = fmt.Sprintf("policy_%d", time.Now().Unix())
+	}
+	
+	// Convert to Policy struct
+	policy := &models.Policy{
+		ID:          policyID,
+		Name:        policyID,
+		Description: getStringFromMap(policyConfig, "description", ""),
+		Type:        getStringFromMap(policyConfig, "type", "network_filter"),
+		Priority:    1,
+		Enabled:     true,
+		Rules:       []models.Rule{},
+		Metadata:    make(map[string]interface{}),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	
+	// Create rule from policy config
+	rule := models.Rule{
+		ID:         fmt.Sprintf("rule_%s", policyID),
+		Action:     getStringFromMap(policyConfig, "action", "block"),
+		Priority:   1,
+		Conditions: []models.Condition{},
+		Metadata:   make(map[string]interface{}),
+	}
+	
+	// Add conditions based on policy config
+	if target, ok := policyConfig["target"].(string); ok && target != "" {
+		rule.Conditions = append(rule.Conditions, models.Condition{
+			Field:    "destination_ip",
+			Operator: "equals",
+			Value:    target,
+		})
+	}
+	
+	if protocol, ok := policyConfig["protocol"].(string); ok && protocol != "" {
+		rule.Conditions = append(rule.Conditions, models.Condition{
+			Field:    "protocol",
+			Operator: "equals",
+			Value:    protocol,
+		})
+	}
+	
+	if port, ok := policyConfig["port"].(string); ok && port != "" {
+		rule.Conditions = append(rule.Conditions, models.Condition{
+			Field:    "port",
+			Operator: "equals",
+			Value:    port,
+		})
+	}
+	
+	// Add rule to policy
+	policy.Rules = append(policy.Rules, rule)
+	
+	// Send policy to both advanced_policy module and core policy engine
+	if wcm.moduleManager != nil {
+		// Create a message to send to the policy engine
+		policyMessage := map[string]interface{}{
+			"type":   "create_policy",
+			"policy": policy,
+		}
+		
+		// Send to advanced policy module for storage and validation
+		if response, err := wcm.moduleManager.SendMessageToModule("advanced_policy", policyMessage); err != nil {
+			wcm.LogError("Failed to send policy to advanced_policy module: %v", err)
+			return err
+		} else {
+			wcm.LogInfo("Policy %s sent to advanced_policy module: %v", policyID, response)
+		}
+		
+		// Also send to core policy engine for eBPF enforcement
+		// We need to access the core agent's policy engine through the module manager
+		// For now, we'll log that the policy needs to be applied to the core policy engine
+		wcm.LogInfo("Policy %s needs to be applied to core policy engine for eBPF enforcement", policyID)
+	} else {
+		wcm.LogError("Module manager not available, cannot process policy")
+		return fmt.Errorf("module manager not available")
+	}
+	
+	return nil
+}
+
+// getStringFromMap safely extracts a string value from a map
+func getStringFromMap(m map[string]interface{}, key, defaultValue string) string {
+	if val, ok := m[key].(string); ok {
+		return val
+	}
+	return defaultValue
+}
+
+// handleInvestigationMessage handles investigation messages from backend
+func (wcm *WebSocketCommunicationModule) handleInvestigationMessage(msg communication.SecureMessage) error {
+	wcm.LogInfo("Processing investigation message: %s", msg.Payload)
+	// TODO: Process investigation request
+	return nil
+}
+
+// handleThreatMessage handles threat intelligence messages from backend
+func (wcm *WebSocketCommunicationModule) handleThreatMessage(msg communication.SecureMessage) error {
+	wcm.LogInfo("Processing threat message: %s", msg.Payload)
+	// TODO: Process threat intelligence
+	return nil
 }
 
 // monitorConnection monitors the WebSocket connection

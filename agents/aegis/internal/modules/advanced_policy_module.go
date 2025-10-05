@@ -183,37 +183,50 @@ func (apm *AdvancedPolicyModule) HandleMessage(message interface{}) (interface{}
 
 // handleCreatePolicy handles policy creation requests
 func (apm *AdvancedPolicyModule) handleCreatePolicy(msg map[string]interface{}) (interface{}, error) {
-	_, ok := msg["policy"]
+	policyData, ok := msg["policy"]
 	if !ok {
 		return nil, fmt.Errorf("policy is required")
 	}
 	
-	// Convert to Policy struct (simplified)
-	policy := models.Policy{
-		ID:          fmt.Sprintf("policy_%d", time.Now().Unix()),
-		Name:        "New Policy",
-		Description: "Policy created via API",
-		Type:        "network",
-		Priority:    1,
-		Enabled:     true,
-		Rules:       []models.Rule{},
-		Metadata:    make(map[string]interface{}),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	// Convert the policy data to models.Policy struct
+	policy, ok := policyData.(*models.Policy)
+	if !ok {
+		return nil, fmt.Errorf("invalid policy data format")
 	}
 	
 	// Validate policy
-	if err := apm.validatePolicy(policy); err != nil {
+	if err := apm.validatePolicy(*policy); err != nil {
 		return nil, fmt.Errorf("policy validation failed: %w", err)
 	}
 	
 	apm.mu.Lock()
-	apm.policyEngine.AddPolicy(policy)
+	apm.policyEngine.AddPolicy(*policy)
 	apm.mu.Unlock()
+	
+	// Send policy to core policy engine for eBPF enforcement
+	if apm.GetModuleManager() != nil {
+		// Get core components from module manager
+		coreComponents := apm.GetModuleManager().GetCoreComponents()
+		if coreComponents != nil && coreComponents.PolicyEngine != nil {
+			// Apply policy to core policy engine for eBPF enforcement
+			if err := coreComponents.PolicyEngine.AddPolicy(policy); err != nil {
+				apm.LogError("Failed to add policy to core policy engine: %v", err)
+			} else {
+				apm.LogInfo("Policy %s successfully applied to core policy engine for eBPF enforcement", policy.ID)
+			}
+		} else {
+			apm.LogInfo("Core components not available, policy stored locally only")
+		}
+	} else {
+		apm.LogInfo("Module manager not available, policy stored locally only")
+	}
+	
+	apm.LogInfo("Policy %s created successfully with %d rules", policy.ID, len(policy.Rules))
 	
 	return map[string]interface{}{
 		"policy_id": policy.ID,
 		"status":    "created",
+		"rules_count": len(policy.Rules),
 		"timestamp": time.Now(),
 	}, nil
 }

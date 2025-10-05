@@ -18,15 +18,17 @@ ENFORCEMENT_SRC := $(SRC_DIR)/aegis_enforcer.bpf.c
 OBSERVABILITY_SRC := $(SRC_DIR)/aegis_observer.bpf.c
 ADVANCED_MAPS_SRC := $(SRC_DIR)/aegis_advanced_maps.bpf.c
 PROCESS_TRACKER_SRC := $(SRC_DIR)/aegis_process_tracker.bpf.c
+TC_ENFORCER_SRC := $(SRC_DIR)/aegis_tc_enforcer.bpf.c
 
 # eBPF object files
 ENFORCEMENT_OBJ := $(BPF_DIR)/aegis_enforcer.o
 OBSERVABILITY_OBJ := $(BPF_DIR)/aegis_observer.o
 ADVANCED_MAPS_OBJ := $(BPF_DIR)/aegis_advanced_maps.o
 PROCESS_TRACKER_OBJ := $(BPF_DIR)/aegis_process_tracker.o
+TC_ENFORCER_OBJ := $(BPF_DIR)/aegis_tc_enforcer.bpf.o
 
 # All targets
-ALL_OBJS := $(ENFORCEMENT_OBJ) $(OBSERVABILITY_OBJ) $(ADVANCED_MAPS_OBJ) $(PROCESS_TRACKER_OBJ)
+ALL_OBJS := $(ENFORCEMENT_OBJ) $(OBSERVABILITY_OBJ) $(ADVANCED_MAPS_OBJ) $(PROCESS_TRACKER_OBJ) $(TC_ENFORCER_OBJ)
 
 # Compiler flags
 CFLAGS := -g -O2 -Wall -Werror
@@ -83,6 +85,12 @@ $(ADVANCED_MAPS_OBJ): $(ADVANCED_MAPS_SRC) | $(BPF_DIR) vmlinux
 # Build process tracker eBPF program
 $(PROCESS_TRACKER_OBJ): $(PROCESS_TRACKER_SRC) | $(BPF_DIR) vmlinux
 	@echo "Building AEGIS process tracker eBPF program..."
+	$(CLANG) $(CFLAGS) -c $< -o $@
+	@echo "✅ Built $@"
+
+# Build TC enforcer eBPF program
+$(TC_ENFORCER_OBJ): $(TC_ENFORCER_SRC) | $(BPF_DIR) vmlinux
+	@echo "Building AEGIS TC enforcer eBPF program..."
 	$(CLANG) $(CFLAGS) -c $< -o $@
 	@echo "✅ Built $@"
 

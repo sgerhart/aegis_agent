@@ -19,6 +19,7 @@ type ModuleManagerImpl struct {
 	mu           sync.RWMutex
 	ctx          context.Context
 	cancel       context.CancelFunc
+	coreComponents *CoreComponents
 }
 
 // NewModuleManager creates a new module manager
@@ -32,6 +33,7 @@ func NewModuleManager(logger *telemetry.Logger) *ModuleManagerImpl {
 		logger:       logger,
 		ctx:          ctx,
 		cancel:       cancel,
+		coreComponents: &CoreComponents{},
 	}
 }
 
@@ -526,4 +528,18 @@ func (mm *ModuleManagerImpl) Shutdown() error {
 	
 	mm.logger.LogInfo("manager_info", "Module manager shutdown complete", nil)
 	return nil
+}
+
+// SetCoreComponents sets the core agent components
+func (mm *ModuleManagerImpl) SetCoreComponents(components *CoreComponents) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.coreComponents = components
+}
+
+// GetCoreComponents returns the core agent components
+func (mm *ModuleManagerImpl) GetCoreComponents() *CoreComponents {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	return mm.coreComponents
 }
